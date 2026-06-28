@@ -1,0 +1,10 @@
+name = "shotsync"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "shotsync"
+
+# Inject AUTH_TOKEN via: wrangler secret put AUTH_TOKEN — do not hardcode here

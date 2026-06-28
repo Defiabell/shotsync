@@ -1,0 +1,2 @@
+# 复制为 .dev.vars（已 gitignore），填一个长随机串
+AUTH_TOKEN=replace-with-long-random-secret
