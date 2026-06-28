@@ -2,6 +2,8 @@
 
 Your own cross-device image & text pool, deployable to Cloudflare's free tier in a few minutes. Drop a screenshot or photo on one device, grab it on another. No app to install (the phone client is a PWA), no third-party image host — your data lives only in your own Cloudflare account.
 
+![shotsync gallery](docs/screenshot.png)
+
 ## What it is
 
 A single **Cloudflare Worker + R2 bucket** backing a small **PWA gallery**:
