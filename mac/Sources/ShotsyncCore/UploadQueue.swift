@@ -68,6 +68,9 @@ public final class UploadQueue {
 
   /// Compute backoff seconds: 2^attempts, capped at 300.
   public static func backoffSeconds(attempts: Int) -> Int {
-    return min(Int(pow(2.0, Double(attempts))), 300)
+    // Cap before converting to Int: pow can return +inf for huge attempts and
+    // Int(+inf) traps. Comparing the Double first avoids that.
+    let raw = pow(2.0, Double(attempts))
+    return raw >= 300 ? 300 : Int(raw)
   }
 }
