@@ -1,2 +1,3 @@
 .build/
 *.xcodeproj
+shotsync.app/
