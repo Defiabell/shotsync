@@ -24,6 +24,7 @@ iCloud / AirDrop / network drives / public image hosts are either manual, ecosys
 - PWA gallery — "Add to Home Screen", no native app, no App Store
 - Client-side HEIC→JPEG + thumbnail generation (mobile-friendly; the Worker does no image processing)
 - Signed, expiring public share links (HMAC-SHA256, 7 days)
+- Per-item save/download + multi-select batch delete
 - Single-token auth, constant-time compare, token never in URLs
 - 30-day auto-retention via R2 lifecycle
 - Runs entirely on the Cloudflare free tier (Workers + R2)
@@ -56,13 +57,34 @@ You also need a **workers.dev subdomain** (Dashboard → Workers & Pages, one-ti
 
 Dashboard → R2 → bucket `shotsync` → Settings → Object lifecycle rules → delete objects 30 days after creation.
 
-## Use it
+## Using it
 
-- **Any device**: open your Worker URL, enter the token once (stored in `localStorage`), then "Add to Home Screen" for an app-like PWA.
-- **Upload**: `+ image` picks from gallery/camera (converted client-side); `✎ text` pastes a snippet.
-- **Save**: open an item → Save (mobile: share to Photos; desktop: download).
-- **Share**: open an item → Share → a 7-day signed public link is copied to your clipboard.
-- **iOS share-sheet upload** (optional): set up the Shortcut described in [`shortcut/README.md`](shortcut/README.md).
+The UI labels are in Chinese; the English in parentheses below maps each step to the button you'll see.
+
+### 1. First time, on each device
+1. Open your Worker URL (e.g. `https://shotsync.<subdomain>.workers.dev`).
+2. Enter your `AUTH_TOKEN` when prompted — it's saved in `localStorage`, so you won't be asked again on that device.
+3. (Optional) In Safari: **Share → Add to Home Screen** to install it as a PWA. It then runs full-screen like an app.
+
+The gallery shows every item newest-first and auto-refreshes every ~20 s, so anything uploaded from another device appears within seconds.
+
+### 2. Add things to the pool
+- **Image** — tap **`+ 图片`** (Add image): pick from photos or camera. It's converted to JPEG and thumbnailed in your browser, then uploaded.
+- **Text** — tap **`✎ 文字`** (Text), paste/type a snippet, then **`发送`** (Send). It becomes a text card — a cross-device clipboard.
+- **Mac screenshots, automatically** — install the [Mac menu-bar app](mac/README.md): every screenshot uploads on its own.
+- **iOS share sheet** — set up the [Shortcut](shortcut/README.md) to push an image from any app's share sheet.
+
+### 3. Open one item (tap it)
+Tap any thumbnail/card to open it full-screen, then:
+- **`保存` / `复制`** (Save / Copy) — image: save to Photos (mobile) or download (desktop); text: copy to clipboard.
+- **`分享`** (Share) — mint a **7-day public link** to just that item, copied to your clipboard. Anyone with the link can view that one item; the rest of the pool stays private.
+- **`删除`** (Delete) — remove this item.
+- **`关闭`** (Close) — back to the gallery.
+
+### 4. Delete many at once
+1. Tap **`选择`** (Select) to enter selection mode.
+2. Tap items to check them (blue outline); tap again to uncheck.
+3. Tap **`删除选中 (N)`** (Delete selected) → confirm. Or **`取消`** (Cancel) to leave without deleting.
 
 ## Security model & limitations (please read)
 
