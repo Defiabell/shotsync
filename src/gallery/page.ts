@@ -33,6 +33,7 @@ export const galleryHTML = /* html */ `<!doctype html>
   #compose textarea { flex: 1; min-height: 0; resize: none; padding: 12px; border-radius: 8px;
                       border: 1px solid #333; background: #1c1c1c; color: #eee; font-size: 15px; }
   #compose .row { display: flex; justify-content: flex-end; gap: 10px; }
+  #grid .sel { outline: 3px solid #2b6cff; outline-offset: -3px; opacity: .8; }
 </style>
 </head>
 <body>
@@ -48,6 +49,9 @@ export const galleryHTML = /* html */ `<!doctype html>
     <input id="fileInput" type="file" accept="image/*" multiple class="hidden">
     <button id="textBtn" style="background:#444">✎ 文字</button>
     <button id="uploadBtn">+ 图片</button>
+    <button id="selectBtn" style="background:#444">选择</button>
+    <button id="delSelBtn" class="hidden" style="background:#d23">删除选中</button>
+    <button id="cancelSelBtn" class="hidden" style="background:#444">取消</button>
   </header>
   <main id="grid"></main>
   <div id="toast"></div>
@@ -190,6 +194,46 @@ document.querySelector("#delBtn").onclick = async () => {
 let cursor = null, loading = false, knownIds = new Set(), pollTimer = null;
 let contentObserver;
 
+// Multi-select batch delete: tap cells to select, then "delete selected".
+let selectMode = false; const selected = new Set();
+function toggleSelect(el) {
+  const id = el.dataset.id;
+  if (selected.has(id)) { selected.delete(id); el.classList.remove("sel"); }
+  else { selected.add(id); el.classList.add("sel"); }
+  $("#delSelBtn").textContent = "删除选中 (" + selected.size + ")";
+}
+function enterSelect() {
+  selectMode = true; selected.clear();
+  $("#selectBtn").classList.add("hidden"); $("#textBtn").classList.add("hidden"); $("#uploadBtn").classList.add("hidden");
+  $("#delSelBtn").classList.remove("hidden"); $("#cancelSelBtn").classList.remove("hidden");
+  $("#delSelBtn").textContent = "删除选中 (0)";
+}
+function exitSelect() {
+  selectMode = false; selected.clear();
+  document.querySelectorAll("#grid .sel").forEach((e) => e.classList.remove("sel"));
+  $("#selectBtn").classList.remove("hidden"); $("#textBtn").classList.remove("hidden"); $("#uploadBtn").classList.remove("hidden");
+  $("#delSelBtn").classList.add("hidden"); $("#cancelSelBtn").classList.add("hidden");
+}
+async function deleteSelected() {
+  if (!selected.size) { exitSelect(); return; }
+  if (!confirm("删除选中的 " + selected.size + " 项？")) return;
+  const ids = [...selected];
+  let ok = 0;
+  await Promise.all(ids.map(async (id) => {
+    try {
+      const res = await fetch("/api/img/" + id, { method: "DELETE", headers: authHeaders() });
+      if (res.ok) {
+        ok++;
+        const cell = document.querySelector('#grid [data-id="' + id + '"]');
+        if (cell) cell.remove();
+        knownIds.delete(id);
+      }
+    } catch {}
+  }));
+  exitSelect();
+  toast("已删除 " + ok + " 项");
+}
+
 async function fetchPage(c) {
   const qs = c ? "?cursor=" + encodeURIComponent(c) + "&limit=40" : "?limit=40";
   const res = await fetch("/api/list" + qs, { headers: authHeaders() });
@@ -222,7 +266,7 @@ function makeCell(item) {
   el.dataset.id = item.id;
   el.dataset.kind = isText ? "text" : "image";
   if (isText) { el.className = "txtcell"; el.textContent = "…"; }
-  el.onclick = () => openFull(item.id);
+  el.onclick = () => { if (selectMode) toggleSelect(el); else openFull(item.id); };
   contentObserver.observe(el);
   return el;
 }
@@ -339,6 +383,10 @@ function setupUpload() {
   $("#composeSend").onclick = async () => {
     if (await sendText(composeText.value)) { compose.classList.add("hidden"); toast("已发送"); await poll(); }
   };
+
+  $("#selectBtn").onclick = enterSelect;
+  $("#cancelSelBtn").onclick = exitSelect;
+  $("#delSelBtn").onclick = deleteSelected;
 }
 
 if ("serviceWorker" in navigator) {
