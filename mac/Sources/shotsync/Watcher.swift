@@ -22,9 +22,11 @@ final class Watcher {
         me.handleCandidate(p)
       }
     }
+    // UseCFTypes makes eventPaths a CFArray of CFString (toll-free bridges to
+    // [String]); without it FSEvents passes a C char** and the NSArray cast traps.
     stream = FSEventStreamCreate(kCFAllocatorDefault, callback, &ctx,
       [folder] as CFArray, FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
-      0.5, UInt32(kFSEventStreamCreateFlagFileEvents))
+      0.5, UInt32(kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagUseCFTypes))
     if let stream {
       FSEventStreamSetDispatchQueue(stream, DispatchQueue.main)
       FSEventStreamStart(stream)
