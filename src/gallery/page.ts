@@ -1,3 +1,5 @@
+import { maskToken } from "./settings";
+
 // The demo variant is derived once at module load (see the bottom of this file)
 // by flipping the DEMO const the inline script declares.
 export const galleryHTML = /* html */ `<!doctype html>
@@ -35,6 +37,15 @@ export const galleryHTML = /* html */ `<!doctype html>
   #compose textarea { flex: 1; min-height: 0; resize: none; padding: 12px; border-radius: 8px;
                       border: 1px solid #333; background: #1c1c1c; color: #eee; font-size: 15px; }
   #compose .row { display: flex; justify-content: flex-end; gap: 10px; }
+  #settings { position: fixed; inset: 0; z-index: 11; background: rgba(0,0,0,.92);
+              display: flex; align-items: center; justify-content: center; padding: 16px; }
+  #settings .card { width: 100%; max-width: 420px; background: #181818; border: 1px solid #2a2a2a;
+                    border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  #settings h2 { font-size: 16px; margin: 0; }
+  #settings .kv { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #aaa; }
+  #settings code { font: 13px/1.4 ui-monospace, Menlo, monospace; color: #eee; word-break: break-all;
+                   background: #222; padding: 8px; border-radius: 8px; user-select: all; }
+  #settings .row { display: flex; justify-content: flex-end; gap: 10px; }
   #grid .sel { outline: 3px solid #2b6cff; outline-offset: -3px; opacity: .8; }
 </style>
 <!-- Inline so the browser never requests /favicon.ico, which this Worker does
@@ -55,6 +66,7 @@ export const galleryHTML = /* html */ `<!doctype html>
     <button id="textBtn" style="background:#444">✎ 文字</button>
     <button id="uploadBtn">+ 图片</button>
     <button id="selectBtn" style="background:#444">选择</button>
+    <button id="settingsBtn" style="background:#444" title="设置" aria-label="设置">⚙</button>
     <button id="delSelBtn" class="hidden" style="background:#d23">删除选中</button>
     <button id="cancelSelBtn" class="hidden" style="background:#444">取消</button>
   </header>
@@ -66,6 +78,22 @@ export const galleryHTML = /* html */ `<!doctype html>
     <div class="row">
       <button id="composeSend">发送</button>
       <button id="composeCancel" style="background:#444">取消</button>
+    </div>
+  </div>
+
+  <div id="settings" class="hidden">
+    <div class="card">
+      <h2>设置</h2>
+      <div class="kv"><span>相册地址（其他设备照着输）</span><code id="settingsUrl"></code></div>
+      <div class="kv"><span>访问 token</span><code id="tokenValue"></code></div>
+      <div class="row">
+        <button id="tokenReveal" style="background:#444">显示</button>
+        <button id="tokenCopy">复制</button>
+      </div>
+      <div class="row" style="justify-content:space-between;margin-top:6px">
+        <button id="logoutBtn" style="background:#d23">退出登录</button>
+        <button id="settingsClose" style="background:#444">关闭</button>
+      </div>
     </div>
   </div>
 
@@ -106,6 +134,38 @@ $("#tokenSave").onclick = async () => {
   localStorage.setItem(TOKEN_KEY, token);
   if (await apiOk()) { showApp(); setupUpload(); await initFeed(); }
   else { localStorage.removeItem(TOKEN_KEY); showGate("token 无效"); }
+};
+
+// Settings panel: where this device points and the token it holds, so a second
+// device can be set up without digging through localStorage. The token is
+// masked by default — this app auto-uploads Mac screenshots, so a plaintext
+// token on screen is one ⌘⇧3 away from landing in the pool. maskToken is the
+// real function from ./settings (see its unit tests), inlined at build time.
+const maskToken = ${maskToken.toString()};
+let tokenShown = false;
+function renderToken() {
+  $("#tokenValue").textContent = tokenShown ? token : maskToken(token);
+  $("#tokenReveal").textContent = tokenShown ? "隐藏" : "显示";
+}
+function closeSettings() { tokenShown = false; $("#settings").classList.add("hidden"); }
+$("#settingsBtn").onclick = () => {
+  tokenShown = false;
+  $("#settingsUrl").textContent = location.origin;
+  renderToken();
+  $("#settings").classList.remove("hidden");
+};
+$("#settingsClose").onclick = closeSettings;
+$("#tokenReveal").onclick = () => { tokenShown = !tokenShown; renderToken(); };
+$("#tokenCopy").onclick = async () => {
+  try { await navigator.clipboard.writeText(token); toast("token 已复制"); }
+  catch { prompt("访问 token，选中复制：", token); }
+};
+// Log out = forget the token and reload: boot() then lands on the gate with no
+// leftover poll timer or duplicated upload handlers to worry about.
+$("#logoutBtn").onclick = () => {
+  if (!confirm("退出登录？这台设备之后要重新输入 token。")) return;
+  localStorage.removeItem(TOKEN_KEY);
+  location.reload();
 };
 
 // Task 10-12 implementation:
@@ -415,7 +475,7 @@ if ("serviceWorker" in navigator) {
 // Read-only demo pool: no token gate, no write affordances, a link back to the repo.
 async function enterDemo() {
   showApp();
-  ["#uploadBtn", "#textBtn", "#selectBtn", "#shareBtn", "#delBtn"].forEach((s) => $(s).classList.add("hidden"));
+  ["#uploadBtn", "#textBtn", "#selectBtn", "#settingsBtn", "#shareBtn", "#delBtn"].forEach((s) => $(s).classList.add("hidden"));
   if (DEMO_EN) document.documentElement.lang = "en";
   $("#bar h1").textContent = DEMO_EN ? "shotsync · read-only demo" : "shotsync · 只读演示池";
   $("#closeBtn").textContent = DEMO_EN ? "Close" : "关闭";

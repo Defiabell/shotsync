@@ -112,9 +112,12 @@ Tap any thumbnail/card to open it full-screen, then:
 2. Tap items to check them (blue outline); tap again to uncheck.
 3. Tap **`删除选中 (N)`** (Delete selected) → confirm. Or **`取消`** (Cancel) to leave without deleting.
 
-## Security model & limitations (please read)
+### 5. See your token, set up another device, or log out
+Tap **`⚙`** in the top bar. The panel shows this pool's URL and the token this device holds — masked by default, because the Mac app auto-uploads screenshots and a plaintext token on screen is one ⌘⇧3 away from landing in the pool.
+- **`显示`** (Show) toggles the full token; **`复制`** (Copy) puts it on the clipboard for pasting into another device.
+- **`退出登录`** (Log out) forgets the token on this device and returns to the token prompt. Nothing changes server-side; the same token still works elsewhere.
 
-- **Single shared token.** Anyone with the URL **and** token can view/upload/delete. This is a single-user / trusted-circle tool, not multi-tenant. Rotate with `npx wrangler secret put AUTH_TOKEN` — note this also invalidates all live share links, since the token is the link signing key.
+- **Single shared token.** Anyone with the URL **and** token can view/upload/delete. This is a single-user / trusted-circle tool, not multi-tenant — there are no per-user accounts and no way to "switch" tokens on one pool; a second pool is a second Worker deployment. Rotate with `npx wrangler secret put AUTH_TOKEN` — note this also invalidates all live share links, since the token is the link signing key.
 - **Share links are public** until they expire (7 days): anyone with the link can see that one item.
 - **Transit pool, not an archive.** Items auto-delete after 30 days by design.
 - **The UI is currently in Chinese.** i18n PRs welcome.
