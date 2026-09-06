@@ -128,10 +128,6 @@ npx tsc --noEmit  # 类型检查
 npm run dev       # 本地开发 —— 建一个含 AUTH_TOKEN=<任意串> 的 .dev.vars
 ```
 
-## 社区
-
-- [LinuxDO](https://linux.do/) —— 新的理想型社区
-
 ## License
 
 [MIT](LICENSE)

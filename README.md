@@ -128,10 +128,6 @@ npx tsc --noEmit  # type-check
 npm run dev       # local dev — create a .dev.vars with AUTH_TOKEN=<anything>
 ```
 
-## Community
-
-- [LinuxDO](https://linux.do/) — a friendly Chinese dev community
-
 ## License
 
 [MIT](LICENSE)
