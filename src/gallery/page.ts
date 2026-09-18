@@ -8,6 +8,8 @@ export const galleryHTML = /* html */ `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>shotsync</title>
+<meta name="description" content="shotsync 跨设备图片与文字池。在自己的 Cloudflare 实例中上传截图、照片和文字，从另一台设备取回。">
+<meta name="robots" content="noindex, follow">
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#111111">
 <style>
@@ -57,6 +59,7 @@ export const galleryHTML = /* html */ `<!doctype html>
     <div>输入访问 token</div>
     <input id="tokenInput" type="password" placeholder="Bearer token" autocomplete="off">
     <button id="tokenSave">进入相册</button>
+    <a href="/about" style="color:#9dbdff">了解 shotsync · 部署与使用教程</a>
     <div id="gateErr" style="color:#ff6b6b"></div>
   </div>
 
@@ -71,6 +74,7 @@ export const galleryHTML = /* html */ `<!doctype html>
     <button id="cancelSelBtn" class="hidden" style="background:#444">取消</button>
   </header>
   <main id="grid"></main>
+  <footer style="padding:20px;text-align:center"><a href="/about" style="color:#9dbdff">关于 shotsync · 部署与使用教程</a></footer>
   <div id="toast"></div>
 
   <div id="compose" class="hidden">

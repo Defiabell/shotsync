@@ -7,12 +7,32 @@ import { handleShareCreate, handleSharedItem } from "./handlers/share";
 import { galleryDemoHTML, galleryHTML } from "./gallery/page";
 import { manifestJSON } from "./gallery/manifest";
 import { swJS } from "./gallery/sw";
+import { aboutHTML, robotsTXT, sitemapXML } from "./about";
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     const { pathname } = url;
     const m = request.method;
+    const isDemo = env.DEMO_MODE === "1";
+
+    if (pathname === "/about/" && (m === "GET" || m === "HEAD")) {
+      return new Response(null, { status: 308, headers: { location: "/about" } });
+    }
+    if (["/about", "/robots.txt", "/sitemap.xml"].includes(pathname)) {
+      if (m !== "GET" && m !== "HEAD") return err(405, "method not allowed");
+      const body = pathname === "/about" ? aboutHTML
+        : pathname === "/robots.txt" ? robotsTXT(isDemo) : sitemapXML(isDemo);
+      const contentType = pathname === "/about" ? "text/html"
+        : pathname === "/robots.txt" ? "text/plain" : "application/xml";
+      return new Response(m === "HEAD" ? null : body, {
+        headers: {
+          "content-type": `${contentType}; charset=utf-8`,
+          "cache-control": "public, max-age=300",
+          ...(pathname === "/about" && !isDemo ? { "x-robots-tag": "noindex, follow" } : {}),
+        },
+      });
+    }
 
     if (pathname === "/" && m === "GET") {
       // On the demo deployment, flip the frontend into read-only demo chrome.
