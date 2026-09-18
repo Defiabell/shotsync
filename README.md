@@ -6,6 +6,8 @@ Your own cross-device image & text pool, deployable to Cloudflare's free tier in
 
 **🎬 Live demo (read-only sample pool): https://shotsync-demo.defiabell.workers.dev**
 
+**Product overview & setup guide:** https://shotsync-demo.defiabell.workers.dev/about
+
 ![shotsync gallery](docs/screenshot.png)
 
 ## What it is
@@ -82,6 +84,12 @@ You also need a **workers.dev subdomain** (Dashboard → Workers & Pages, one-ti
 ### 30-day retention
 
 Dashboard → R2 → bucket `shotsync` → Settings → Object lifecycle rules → delete objects 30 days after creation.
+
+This rule must be configured explicitly: the Worker does not create it automatically.
+
+### Public product page and indexing
+
+`/about` serves a static product overview without requiring JavaScript or a token. The gallery remains at `/` and links to it. Only the public demo advertises `/about` in `/sitemap.xml`; private deployments send `X-Robots-Tag: noindex, follow` for their copy. The gallery is marked `noindex, follow`, and `/robots.txt` excludes API, image, and share paths from crawling. These indexing hints are not access controls: the normal token and signed-link rules still apply.
 
 ## Using it
 
