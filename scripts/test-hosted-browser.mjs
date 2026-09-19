@@ -19,7 +19,7 @@ try {
  const sql=join(temp,'fixture.sql');
  writeFileSync(sql,`INSERT INTO users(id,email,password_hash,verified_at,created_at) VALUES('browser','browser@example.com','${validHash}',NULL,1);`);
  run(['d1','execute','shotsync-hosted','--local','--file',sql,...common]);
- server=spawn(process.execPath,[cli,'dev','--local','--ip','127.0.0.1','--local-protocol','https','--port','8788','--var','PUBLIC_ORIGIN:'+origin,...common],{stdio:['ignore','pipe','pipe']});
+ server=spawn(process.execPath,[cli,'dev','--local','--ip','127.0.0.1','--local-protocol','https','--port','8788','--var','PUBLIC_ORIGIN:'+origin,'--var','TURNSTILE_SITE_KEY:',...common],{stdio:['ignore','pipe','pipe']});
  let output='';server.stdout.on('data',x=>output+=x);server.stderr.on('data',x=>output+=x);
  await new Promise((resolve,reject)=>{const started=Date.now();const timer=setInterval(()=>{if(output.includes('Ready on')){clearInterval(timer);resolve();}else if(server.exitCode!==null||Date.now()-started>30000){clearInterval(timer);reject(new Error(output));}},100);});
  browser=await chromium.launch({headless:true});

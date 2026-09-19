@@ -26,15 +26,15 @@ CREATE TABLE shares (
 );
 CREATE INDEX shares_file ON shares(file_id);
 CREATE TRIGGER reserve_file BEFORE INSERT ON files BEGIN
- SELECT CASE WHEN (SELECT COUNT(*) FROM files WHERE state='pending') >= 1 THEN RAISE(ABORT,'quota:global-concurrency') END;
- SELECT CASE WHEN (SELECT COUNT(*) FROM files WHERE user_id=NEW.user_id AND state='pending') >= 2 THEN RAISE(ABORT,'quota:concurrency') END;
- SELECT CASE WHEN COALESCE((SELECT bytes FROM storage_usage WHERE scope=NEW.user_id),0)+NEW.size > 209715200 THEN RAISE(ABORT,'quota:storage') END;
- SELECT CASE WHEN COALESCE((SELECT items FROM storage_usage WHERE scope=NEW.user_id),0) >= 100 THEN RAISE(ABORT,'quota:items') END;
- SELECT CASE WHEN COALESCE((SELECT bytes FROM storage_usage WHERE scope='global'),0)+NEW.size > 10737418240 THEN RAISE(ABORT,'quota:global-storage') END;
- SELECT CASE WHEN COALESCE((SELECT uploads FROM daily_usage WHERE scope=NEW.user_id AND day=NEW.day),0) >= 50 THEN RAISE(ABORT,'quota:daily-count') END;
- SELECT CASE WHEN COALESCE((SELECT bytes FROM daily_usage WHERE scope=NEW.user_id AND day=NEW.day),0)+NEW.size > 104857600 THEN RAISE(ABORT,'quota:daily-bytes') END;
- SELECT CASE WHEN COALESCE((SELECT uploads FROM daily_usage WHERE scope='global' AND day=NEW.day),0) >= 2000 THEN RAISE(ABORT,'quota:global-count') END;
- SELECT CASE WHEN COALESCE((SELECT bytes FROM daily_usage WHERE scope='global' AND day=NEW.day),0)+NEW.size > 2147483648 THEN RAISE(ABORT,'quota:global-bytes') END;
+ SELECT (CASE WHEN (SELECT COUNT(*) FROM files WHERE state='pending') >= 1 THEN RAISE(ABORT,'quota:global-concurrency') END);
+ SELECT (CASE WHEN (SELECT COUNT(*) FROM files WHERE user_id=NEW.user_id AND state='pending') >= 2 THEN RAISE(ABORT,'quota:concurrency') END);
+ SELECT (CASE WHEN COALESCE((SELECT bytes FROM storage_usage WHERE scope=NEW.user_id),0)+NEW.size > 209715200 THEN RAISE(ABORT,'quota:storage') END);
+ SELECT (CASE WHEN COALESCE((SELECT items FROM storage_usage WHERE scope=NEW.user_id),0) >= 100 THEN RAISE(ABORT,'quota:items') END);
+ SELECT (CASE WHEN COALESCE((SELECT bytes FROM storage_usage WHERE scope='global'),0)+NEW.size > 10737418240 THEN RAISE(ABORT,'quota:global-storage') END);
+ SELECT (CASE WHEN COALESCE((SELECT uploads FROM daily_usage WHERE scope=NEW.user_id AND day=NEW.day),0) >= 50 THEN RAISE(ABORT,'quota:daily-count') END);
+ SELECT (CASE WHEN COALESCE((SELECT bytes FROM daily_usage WHERE scope=NEW.user_id AND day=NEW.day),0)+NEW.size > 104857600 THEN RAISE(ABORT,'quota:daily-bytes') END);
+ SELECT (CASE WHEN COALESCE((SELECT uploads FROM daily_usage WHERE scope='global' AND day=NEW.day),0) >= 2000 THEN RAISE(ABORT,'quota:global-count') END);
+ SELECT (CASE WHEN COALESCE((SELECT bytes FROM daily_usage WHERE scope='global' AND day=NEW.day),0)+NEW.size > 2147483648 THEN RAISE(ABORT,'quota:global-bytes') END);
 END;
 CREATE TRIGGER file_reserved AFTER INSERT ON files BEGIN
  INSERT INTO storage_usage(scope,bytes,items) VALUES(NEW.user_id,NEW.size,1) ON CONFLICT(scope) DO UPDATE SET bytes=bytes+NEW.size,items=items+1;
@@ -60,10 +60,10 @@ CREATE TABLE downloads (
 );
 CREATE INDEX downloads_created ON downloads(created_at);
 CREATE TRIGGER download_reserve BEFORE INSERT ON downloads BEGIN
- SELECT CASE WHEN COALESCE((SELECT downloads FROM daily_usage WHERE scope=NEW.user_id AND day=NEW.day),0) >= 2000 THEN RAISE(ABORT,'quota:downloads') END;
- SELECT CASE WHEN COALESCE((SELECT download_bytes FROM daily_usage WHERE scope=NEW.user_id AND day=NEW.day),0)+NEW.bytes > 1073741824 THEN RAISE(ABORT,'quota:download-bytes') END;
- SELECT CASE WHEN COALESCE((SELECT downloads FROM daily_usage WHERE scope='global' AND day=NEW.day),0) >= 20000 THEN RAISE(ABORT,'quota:global-downloads') END;
- SELECT CASE WHEN COALESCE((SELECT download_bytes FROM daily_usage WHERE scope='global' AND day=NEW.day),0)+NEW.bytes > 21474836480 THEN RAISE(ABORT,'quota:global-download-bytes') END;
+ SELECT (CASE WHEN COALESCE((SELECT downloads FROM daily_usage WHERE scope=NEW.user_id AND day=NEW.day),0) >= 2000 THEN RAISE(ABORT,'quota:downloads') END);
+ SELECT (CASE WHEN COALESCE((SELECT download_bytes FROM daily_usage WHERE scope=NEW.user_id AND day=NEW.day),0)+NEW.bytes > 1073741824 THEN RAISE(ABORT,'quota:download-bytes') END);
+ SELECT (CASE WHEN COALESCE((SELECT downloads FROM daily_usage WHERE scope='global' AND day=NEW.day),0) >= 20000 THEN RAISE(ABORT,'quota:global-downloads') END);
+ SELECT (CASE WHEN COALESCE((SELECT download_bytes FROM daily_usage WHERE scope='global' AND day=NEW.day),0)+NEW.bytes > 21474836480 THEN RAISE(ABORT,'quota:global-download-bytes') END);
 END;
 CREATE TRIGGER download_recorded AFTER INSERT ON downloads BEGIN
  INSERT INTO daily_usage(scope,day,downloads,download_bytes) VALUES(NEW.user_id,NEW.day,1,NEW.bytes) ON CONFLICT(scope,day) DO UPDATE SET downloads=downloads+1,download_bytes=download_bytes+NEW.bytes;
