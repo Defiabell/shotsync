@@ -1,7 +1,7 @@
 import type { HostedEnv } from './types';
 import { consumeRate } from './limits';
 import { readJson } from './http';
-import { hashPassword, randomToken, tokenHash, verifyPassword, withPasswordWork } from './account-crypto';
+import { hashPassword, randomToken, tokenHash, validPasswordPepper, verifyPassword, withPasswordWork } from './account-crypto';
 
 const DAY = 86_400_000;
 const COOKIE = '__Host-shotsync';
@@ -101,6 +101,7 @@ export async function handleAccounts(request: Request, env: HostedEnv): Promise<
     return reply({ ok: true }, 200, cookie('', 0));
   }
   if (!['register', 'login', 'reset-password'].includes(route)) return fail('Not found', 404);
+  if (!validPasswordPepper(env.PASSWORD_PEPPER)) return fail('Password authentication is temporarily unavailable', 503);
   const ip = await ipKey(request);
   if (await limited(env, `ip:${ip}`, 30, 600)) return fail('Try again later', 429);
   const body = await readJson(request);
@@ -113,7 +114,7 @@ export async function handleAccounts(request: Request, env: HostedEnv): Promise<
     if (await limited(env, 'password-global', 120, 60)) return fail('Authentication is busy. Try again shortly.', 429);
     const user = await env.DB.prepare('SELECT * FROM users WHERE email=?').bind(email).first<UserRow>();
     // Equal-cost password work also for unknown addresses.
-    const valid = await withPasswordWork(env.DB, async () => user ? verifyPassword(body.password as string, user.password_hash) : (await hashPassword(body.password as string), false));
+    const valid = await withPasswordWork(env.DB, async () => user ? verifyPassword(body.password as string, user.password_hash, env.PASSWORD_PEPPER) : (await hashPassword(body.password as string, env.PASSWORD_PEPPER), false));
     if (!user || !valid) return fail('Invalid email or password', 401);
     const token = randomToken(), now = Date.now();
     await env.DB.batch([
@@ -133,7 +134,7 @@ export async function handleAccounts(request: Request, env: HostedEnv): Promise<
     const user = await env.DB.prepare('SELECT id FROM users WHERE email=? AND recovery_hash=?').bind(email, hash).first();
     if (!user) return fail('Invalid email or recovery code');
     if (await limited(env, 'password-global', 120, 60)) return fail('Authentication is busy. Try again shortly.', 429);
-    const password = await withPasswordWork(env.DB, () => hashPassword(body.password as string));
+    const password = await withPasswordWork(env.DB, () => hashPassword(body.password as string, env.PASSWORD_PEPPER));
     const recoveryCode = randomToken();
     // Compare-and-swap makes recovery one-time even when requests race.
     const updated = await env.DB.prepare('UPDATE users SET password_hash=?,recovery_hash=?,auth_version=auth_version+1 WHERE email=? AND recovery_hash=? RETURNING id')
@@ -146,7 +147,7 @@ export async function handleAccounts(request: Request, env: HostedEnv): Promise<
   if (await env.DB.prepare('SELECT id FROM users WHERE email=?').bind(email).first()) return fail('Account already exists. Sign in or use your recovery code.', 409);
   if ((await env.DB.prepare('SELECT COUNT(*) n FROM users').first<{ n: number }>())!.n >= cap) return fail('Trial is full. Please try again later.', 409);
   if (await limited(env, 'password-global', 120, 60)) return fail('Authentication is busy. Try again shortly.', 429);
-  const password = await withPasswordWork(env.DB, () => hashPassword(body.password as string));
+  const password = await withPasswordWork(env.DB, () => hashPassword(body.password as string, env.PASSWORD_PEPPER));
   const recoveryCode = randomToken();
   const inserted = await createUser(env.DB, crypto.randomUUID(), email, password, await tokenHash(recoveryCode), cap);
   if (!inserted) return fail('Account already exists or trial is full.', 409);

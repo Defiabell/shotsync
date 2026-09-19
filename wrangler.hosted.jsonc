@@ -9,9 +9,6 @@
   "observability": {
     "enabled": true
   },
-  "limits": {
-    "cpu_ms": 1000
-  },
   "vars": {
     "PUBLIC_ORIGIN": "https://shotsync-hosted.defiabell.workers.dev",
     "TURNSTILE_SITE_KEY": "0x4AAAAAAE8wLBNWAJtUWmVb",

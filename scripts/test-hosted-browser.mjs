@@ -1,6 +1,6 @@
 import { chromium, expect } from '@playwright/test';
 import { execFileSync, spawn } from 'node:child_process';
-import { scryptSync } from 'node:crypto';
+import { pbkdf2Sync, createHmac } from 'node:crypto';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,12 +14,12 @@ try {
  run(['d1','migrations','apply','shotsync-hosted','--local',...common]);
  const password='browser-fixture-password';
  // Valid format salt; test account exists only in the temporary local database.
- const validSalt='a'.repeat(64);
- const validHash='scrypt:16384:8:5:'+validSalt+':'+scryptSync(password,validSalt,32,{N:16384,r:8,p:5,maxmem:32*1024*1024}).toString('hex');
+ const validSalt='a'.repeat(64), pepper='b'.repeat(64);
+ const validHash='pbkdf2-sha256:v1:100000:'+validSalt+':'+createHmac('sha256',Buffer.from(pepper,'hex')).update(pbkdf2Sync(password,Buffer.from(validSalt,'hex'),100000,32,'sha256')).digest('hex');
  const sql=join(temp,'fixture.sql');
  writeFileSync(sql,`INSERT INTO users(id,email,password_hash,verified_at,created_at) VALUES('browser','browser@example.com','${validHash}',NULL,1);`);
  run(['d1','execute','shotsync-hosted','--local','--file',sql,...common]);
- server=spawn(process.execPath,[cli,'dev','--local','--ip','127.0.0.1','--local-protocol','https','--port','8788','--var','PUBLIC_ORIGIN:'+origin,'--var','TURNSTILE_SITE_KEY:',...common],{stdio:['ignore','pipe','pipe']});
+ server=spawn(process.execPath,[cli,'dev','--local','--ip','127.0.0.1','--local-protocol','https','--port','8788','--var','PUBLIC_ORIGIN:'+origin,'--var','TURNSTILE_SITE_KEY:','--var','PASSWORD_PEPPER:'+pepper,...common],{stdio:['ignore','pipe','pipe']});
  let output='';server.stdout.on('data',x=>output+=x);server.stderr.on('data',x=>output+=x);
  await new Promise((resolve,reject)=>{const started=Date.now();const timer=setInterval(()=>{if(output.includes('Ready on')){clearInterval(timer);resolve();}else if(server.exitCode!==null||Date.now()-started>30000){clearInterval(timer);reject(new Error(output));}},100);});
  browser=await chromium.launch({headless:true});
