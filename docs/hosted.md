@@ -44,14 +44,14 @@ Pending uploads expire after five minutes; the one-minute cron reclaims them, ex
 
 ## Deploy prerequisites
 
-1. Node.js 22+ and a Cloudflare account with Workers, D1 and R2 enabled. Review Workers CPU limits for scrypt password work; removing email does not guarantee that the entire deployment fits a free plan. No email service or sender domain is required.
+1. Node.js 22+ and a Cloudflare account with Workers Paid, D1 and R2 enabled. The hosted config sets a 1,000 ms CPU ceiling for scrypt password work; Cloudflare rejects that setting on Workers Free. Upgrading a plan requires operator approval. No email service or sender domain is required.
 2. Dedicated Worker `shotsync-hosted`, R2 bucket `shotsync-hosted`, and D1 database `shotsync-hosted`. Never bind the personal or demo bucket. Put the returned D1 UUID into `wrangler.hosted.jsonc`.
 3. Set `PUBLIC_ORIGIN` to the final HTTPS origin, and `TURNSTILE_SITE_KEY` to a widget restricted to that hostname. Store `TURNSTILE_SECRET_KEY` as a Worker secret. No other site's Turnstile keys are reused.
 4. Configure the bucket's eight-day lifecycle and observability/billing alerts. Review registration and upload caps. Use a custom domain if stronger edge rules are needed.
 5. With explicit deployment authorization: `npm run deploy:hosted`. It checks placeholders, applies the new hosted database migrations, then deploys the Worker. Do not run any personal/demo setup or seed scripts.
 6. Test registration, saving the recovery code, login, recovery-code rotation, rejection of old credentials, and cross-device transfer. Confirm Turnstile hostname validation, cron cleanup and dashboard metrics.
 
-The checked-in config deliberately contains a local origin, blank Turnstile site key and placeholder DB UUID; the deployment preflight refuses these values. Run `npm run dev:hosted` only for local development. Local HTTPS is needed for browser session cookies; see the browser test for a fully isolated fixture environment.
+The checked-in config identifies the operator's dedicated hosted resources. For your own deployment, replace the origin, Turnstile site key, D1 ID and bucket with resources in your account; never copy another operator's resource IDs. The preflight rejects missing values and local origins. Run `npm run dev:hosted` only for local development. Local HTTPS is needed for browser session cookies; see the browser test for a fully isolated fixture environment.
 
 ## Verification and rollback
 
@@ -65,3 +65,5 @@ To suspend new writes, set `UPLOADS_ENABLED=0` and deploy. Retain the hosted dat
 Official references: [D1 transactions](https://developers.cloudflare.com/d1/worker-api/d1-database/), [R2 lifecycle](https://developers.cloudflare.com/r2/buckets/object-lifecycles/).
 
 Toolchain note: the compatible Vitest/Workers test stack currently reports development-only npm advisories (8 at implementation time); these packages are not imported by the deployed Worker. Run development servers on loopback only. The package resolver rejected the newest advertised Wrangler version with a publication-date cutoff; this change uses the resolved lockfile and its supported compatibility date. Track the toolchain updates separately before exposing any development server.
+
+Launch status (2026-09-19): the dedicated D1, R2 bucket and Turnstile widget have been created, all three migrations applied, and the eight-day `users/` R2 expiry configured. Worker deployment is blocked until Workers Paid is enabled; the Turnstile secret still needs to be installed. The service is not publicly available yet. Remote D1 rejected unparenthesized CASE expressions in trigger bodies; migration 0002 now parenthesizes those expressions without changing quota behavior.

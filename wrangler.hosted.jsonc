@@ -3,16 +3,38 @@
   "name": "shotsync-hosted",
   "main": "src/hosted/index.ts",
   "compatibility_date": "2026-08-22",
-  "compatibility_flags": ["nodejs_compat"],
-  "observability": {"enabled": true},
-  "limits": {"cpu_ms": 1000},
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "observability": {
+    "enabled": true
+  },
+  "limits": {
+    "cpu_ms": 1000
+  },
   "vars": {
-    "PUBLIC_ORIGIN": "http://localhost:8787",
-    "TURNSTILE_SITE_KEY": "",
+    "PUBLIC_ORIGIN": "https://shotsync-hosted.defiabell.workers.dev",
+    "TURNSTILE_SITE_KEY": "0x4AAAAAAE8wLBNWAJtUWmVb",
     "REGISTRATION_LIMIT": "100",
     "UPLOADS_ENABLED": "1"
   },
-  "d1_databases": [{"binding": "DB", "database_name": "shotsync-hosted", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations"}],
-  "r2_buckets": [{"binding": "BUCKET", "bucket_name": "shotsync-hosted"}],
-  "triggers": {"crons": ["* * * * *"]}
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "shotsync-hosted",
+      "database_id": "e45d4d92-d303-40de-9ae3-7de017417b16",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "BUCKET",
+      "bucket_name": "shotsync-hosted"
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "* * * * *"
+    ]
+  }
 }
