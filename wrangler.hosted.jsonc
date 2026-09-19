@@ -14,7 +14,7 @@
     "TURNSTILE_SITE_KEY": "0x4AAAAAAE8wLBNWAJtUWmVb",
     "REGISTRATION_LIMIT": "100",
     "UPLOADS_ENABLED": "1",
-    "SUPABASE_URL": ""
+    "SUPABASE_URL": "https://mjtagsjmnsgqirtvlpzf.supabase.co"
   },
   "d1_databases": [
     {
