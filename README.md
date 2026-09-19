@@ -142,3 +142,7 @@ npm run dev       # local dev — create a .dev.vars with AUTH_TOKEN=<anything>
 ## License
 
 [MIT](LICENSE)
+
+## Hosted accounts (beta implementation)
+
+An optional, separate hosted deployment supports email/password accounts with recovery codes (no email delivery), private file pools, revocable device tokens and strict account/global usage limits. It is not publicly available yet. Deployment prerequisites and limits are in [docs/hosted.md](docs/hosted.md). Existing self-hosted and read-only demo deployments keep their current behavior. Tooling now requires Node.js 22+.

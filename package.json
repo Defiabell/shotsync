@@ -6,13 +6,24 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "dev:hosted": "wrangler dev --config wrangler.hosted.jsonc --ip 127.0.0.1",
+    "test:browser": "node scripts/test-hosted-browser.mjs",
+    "types:hosted": "wrangler types --config wrangler.hosted.jsonc --strict-vars false --include-runtime false --env-interface HostedBindings",
+    "check:hosted": "node scripts/check-hosted-config.mjs",
+    "deploy:hosted": "npm run check:hosted && wrangler d1 migrations apply shotsync-hosted --remote --config wrangler.hosted.jsonc && wrangler deploy --config wrangler.hosted.jsonc"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.5.0",
-    "@cloudflare/workers-types": "^4.0.0",
+    "@cloudflare/vitest-pool-workers": "^0.8.71",
+    "@cloudflare/workers-types": "^5.20260820.1",
+    "@playwright/test": "^1.62.1",
+    "@types/node": "^22.20.1",
     "typescript": "^5.5.0",
-    "vitest": "^2.0.0",
-    "wrangler": "^3.78.0"
+    "vitest": "~3.2.0",
+    "wrangler": "^4.124.0"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }
