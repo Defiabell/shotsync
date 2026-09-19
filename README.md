@@ -143,6 +143,6 @@ npm run dev       # local dev — create a .dev.vars with AUTH_TOKEN=<anything>
 
 [MIT](LICENSE)
 
-## Hosted accounts (beta implementation)
+## Hosted accounts (public beta)
 
-An optional, separate hosted deployment supports email/password accounts with recovery codes (no email delivery), private file pools, revocable device tokens and strict account/global usage limits. It is not publicly available yet. Deployment prerequisites and limits are in [docs/hosted.md](docs/hosted.md). Existing self-hosted and read-only demo deployments keep their current behavior. Tooling now requires Node.js 22+.
+An optional, separate hosted deployment supports email/password accounts with recovery codes (no email delivery), private file pools, revocable device tokens and strict account/global usage limits. [Try the hosted beta](https://shotsync-hosted.defiabell.workers.dev) (100 accounts). It runs on Workers Free, but measured login CPU exceeds the nominal free budget and may be throttled under load. Deployment prerequisites and limits are in [docs/hosted.md](docs/hosted.md). Existing self-hosted and read-only demo deployments keep their current behavior. Tooling now requires Node.js 22+.

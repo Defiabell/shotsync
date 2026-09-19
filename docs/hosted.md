@@ -1,6 +1,6 @@
 # Hosted ShotSync beta
 
-The hosted entry point (`src/hosted/index.ts`) adds email/password accounts with recovery codes and private per-account pools. It is a separate Worker, D1 database and R2 bucket. Existing personal deployments and the read-only demo retain their token-based behavior. The hosted instance is not yet deployed; email delivery and a sender domain are not required.
+The hosted entry point (`src/hosted/index.ts`) adds email/password accounts with recovery codes and private per-account pools. It is a separate Worker, D1 database and R2 bucket. Existing personal deployments and the read-only demo retain their token-based behavior. The [hosted beta](https://shotsync-hosted.defiabell.workers.dev) is deployed on Workers Free; email delivery and a sender domain are not required.
 
 ## What people can do
 
@@ -66,4 +66,6 @@ Official references: [D1 transactions](https://developers.cloudflare.com/d1/work
 
 Toolchain note: the compatible Vitest/Workers test stack currently reports development-only npm advisories (8 at implementation time); these packages are not imported by the deployed Worker. Run development servers on loopback only. The package resolver rejected the newest advertised Wrangler version with a publication-date cutoff; this change uses the resolved lockfile and its supported compatibility date. Track the toolchain updates separately before exposing any development server.
 
-Launch preparation (2026-09-19): dedicated D1/R2/Turnstile resources, all three migrations and eight-day object expiry are configured. Cron capacity has been freed. The password implementation now supports a Free-plan deployment; public availability and production CPU checks are recorded after deployment. Remote D1 required parenthesized CASE expressions in migration 0002 without changing quota behavior.
+Launch preparation (2026-09-19): dedicated D1/R2/Turnstile resources, all three migrations and eight-day object expiry are configured. Cron capacity has been freed. The password implementation supports deploying on Workers Free; deployment does not establish reliable operation within its CPU budget. Remote D1 required parenthesized CASE expressions in migration 0002 without changing quota behavior.
+
+Launch verification (2026-09-20): PR #4 deployed as `b20bde51-2865-4464-a784-1a7e3f51b370`; both secrets are installed and the one-minute cleanup cron is registered. Homepage returns 200 and invalid Turnstile registration returns 403. Five unknown-account login probes (which perform the same PBKDF2/HMAC work) returned 401 normally, with **27–46 ms CPU**, down from prior scrypt probes of 172–326 ms. This still exceeds the documented Workers Free 10 ms CPU budget: burst tolerance allowed these requests, and reliable login under load is not established. No paid upgrade was made and the KDF was not weakened further. Successful login/upload/sharing were verified in the isolated local browser; production registration/recovery remain dependent on a real Turnstile challenge. 115 automated tests, TypeScript, dry run and independent code review passed.
