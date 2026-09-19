@@ -1,5 +1,7 @@
 # Hosted ShotSync beta
 
+> This guide is for operators running a multi-user service. To deploy a personal pool without accounts, use the [default README instructions](../README.md#deploy-your-own-5-min): Worker + R2 + `AUTH_TOKEN`, with no D1 or Supabase. See [mode selection](deployment-modes.md).
+
 The hosted entry point (`src/hosted/index.ts`) adds email/password accounts with recovery codes and private per-account pools. It is a separate Worker, D1 database and R2 bucket. Existing personal deployments and the read-only demo retain their token-based behavior. The [hosted beta](https://shotsync-hosted.defiabell.workers.dev) is deployed on Workers Free; email delivery and a sender domain are not required.
 
 ## What people can do

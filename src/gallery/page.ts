@@ -57,7 +57,8 @@ export const galleryHTML = /* html */ `<!doctype html>
 <body>
   <div id="gate" class="hidden">
     <div>输入访问 token</div>
-    <input id="tokenInput" type="password" placeholder="Bearer token" autocomplete="off">
+    <p style="max-width:320px;color:#aaa;font-size:14px;line-height:1.6;margin:0">这是独立部署的个人图片池，无需注册账号。请输入部署者设置的访问令牌。</p>
+    <input id="tokenInput" type="password" placeholder="ShotSync 访问令牌" autocomplete="off">
     <button id="tokenSave">进入相册</button>
     <a href="/about" style="color:#9dbdff">了解 shotsync · 部署与使用教程</a>
     <div id="gateErr" style="color:#ff6b6b"></div>

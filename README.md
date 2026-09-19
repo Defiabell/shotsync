@@ -8,6 +8,18 @@ Your own cross-device image & text pool, deployable to Cloudflare's free tier in
 
 **Product overview & setup guide:** https://shotsync-demo.defiabell.workers.dev/about
 
+## Choose how to use ShotSync
+
+**Self-hosting is the default: no ShotSync account, Supabase, D1 or email service is required.** Deploy to your Cloudflare account and enter the same access token on each device.
+
+| Mode | Best for | Access | File storage |
+| --- | --- | --- | --- |
+| **Self-hosted (default)** | Your own image and text pool | Deploy, then enter your own `AUTH_TOKEN` | Your Cloudflare R2 |
+| Hosted service (beta) | Using the operator's service without deploying | Register/sign in at the hosted URL | The operator's Cloudflare R2 |
+| Read-only demo | Exploring the interface | Open the demo above; uploads are disabled | Public samples |
+
+For self-hosting, follow [the steps below](#deploy-your-own-5-min). See the [hosted guide](docs/hosted.md) for availability and quotas: the current beta still has a Free-plan CPU limitation and its authentication upgrade is not deployed. [Mode details and FAQ](docs/deployment-modes.md).
+
 ![shotsync gallery](docs/screenshot.png)
 
 ## What it is
@@ -44,7 +56,7 @@ The dividing line is **a live transfer vs. a pool that waits**. LocalSend and Pa
 
 **Choose shotsync if** you keep sending yourself screenshots and want them still there when you sit back down hours later, on a different machine, on a different network — and you would rather they lived in your own Cloudflare account than on a public image host. It replaces the habit of messaging things to yourself, not AirDrop.
 
-**Do not choose shotsync if** you need per-user accounts: one shared token unlocks the whole pool. See the "Security model & limitations" section below before deploying.
+**The default self-hosted mode has no per-user accounts:** one shared token unlocks the whole pool. Use the separate hosted mode if you need isolated accounts. See the "Security model & limitations" section below before deploying.
 
 ## Features
 
@@ -56,11 +68,11 @@ The dividing line is **a live transfer vs. a pool that waits**. LocalSend and Pa
 - Single-token auth, constant-time compare, token never in URLs
 - 30-day auto-retention via R2 lifecycle
 - Runs entirely on the Cloudflare free tier (Workers + R2)
-- ~50 tests (Vitest + `@cloudflare/vitest-pool-workers`)
+- Tests (Vitest + `@cloudflare/vitest-pool-workers`)
 
 ## Deploy your own (~5 min)
 
-Prereqs: a Cloudflare account, Node 18+, and **R2 enabled** (Dashboard → R2 → enable; Cloudflare asks for a card even on the free tier — the free allowance is not charged).
+Prereqs: a Cloudflare account, Node.js 22+, and **R2 enabled** (Dashboard → R2 → enable; Cloudflare asks for a card even on the free tier — the free allowance is not charged).
 
 ```bash
 git clone https://github.com/Defiabell/shotsync
@@ -73,13 +85,17 @@ npx wrangler r2 bucket create shotsync
 
 # 2. set the shared access token — any long random string; you enter it on each device
 openssl rand -hex 24                  # generate one, copy it
-npx wrangler secret put AUTH_TOKEN    # paste it when prompted
+npx wrangler secret put AUTH_TOKEN --config wrangler.toml --env ""    # paste it when prompted
 
 # 3. deploy
 npm run deploy
 ```
 
 You also need a **workers.dev subdomain** (Dashboard → Workers & Pages, one-time) or a custom domain. After deploy you get `https://shotsync.<your-subdomain>.workers.dev`.
+
+`npm run deploy` explicitly uses `wrangler.toml` and deploys only the personal pool. It does not create an account database, request Supabase keys, or deploy the hosted service. `AUTH_TOKEN` is the ShotSync passphrase you generate, not a Cloudflare API token or Supabase key. Save it and share it only with people allowed to access the entire pool.
+
+After deployment, open the same URL and enter the same token on two devices. Upload a short text snippet and check it appears on the other device. An email registration screen means you opened the hosted service; use the personal URL returned by Wrangler instead.
 
 ### 30-day retention
 
@@ -125,7 +141,9 @@ Tap **`⚙`** in the top bar. The panel shows this pool's URL and the token this
 - **`显示`** (Show) toggles the full token; **`复制`** (Copy) puts it on the clipboard for pasting into another device.
 - **`退出登录`** (Log out) forgets the token on this device and returns to the token prompt. Nothing changes server-side; the same token still works elsewhere.
 
-- **Single shared token.** Anyone with the URL **and** token can view/upload/delete. This is a single-user / trusted-circle tool, not multi-tenant — there are no per-user accounts and no way to "switch" tokens on one pool; a second pool is a second Worker deployment. Rotate with `npx wrangler secret put AUTH_TOKEN` — note this also invalidates all live share links, since the token is the link signing key.
+## Security model & limitations
+
+- **Single shared token.** Anyone with the URL **and** token can view/upload/delete. This is a single-user / trusted-circle tool, not multi-tenant — there are no per-user accounts and no way to "switch" tokens on one pool; a second pool is a second Worker deployment. Rotate with `npx wrangler secret put AUTH_TOKEN --config wrangler.toml --env ""` — note this also invalidates all live share links, since the token is the link signing key.
 - **Share links are public** until they expire (7 days): anyone with the link can see that one item.
 - **Transit pool, not an archive.** Items auto-delete after 30 days by design.
 - **The UI is currently in Chinese.** i18n PRs welcome.

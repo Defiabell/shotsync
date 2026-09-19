@@ -58,7 +58,9 @@ export const aboutHTML = /* html */ `<!doctype html>
 <h1>shotsync：截图和文字，换台设备接着用。</h1>
 <p class="intro">shotsync 是一个运行在你自己的 Cloudflare 账号中的图片与文字暂存工具。在电脑上传截图，稍后从手机保存；在手机发一段文字，回到电脑复制。两台设备无需同时在线，也无需连接同一个 Wi-Fi。</p>
 <div class="actions"><a href="https://shotsync-demo.defiabell.workers.dev/">体验只读演示</a><a href="${REPO}#deploy-your-own-5-min">部署自己的 shotsync</a></div>
-<p class="note">演示站只有公开样例，不提供访客上传。想同步自己的内容，需要先部署独立实例。</p>
+<p class="note">演示站只有公开样例，不提供访客上传。自己部署是默认方式，无需注册账号或配置 Supabase；公共账号服务是另一个独立入口。</p>
+
+<section aria-labelledby="modes"><h2 id="modes">自己部署，还是直接使用服务？</h2><p><strong>自己部署：</strong>内容存放在你自己的 Cloudflare，输入一个访问令牌即可使用，无需邮箱、账号数据库或 Supabase。</p><p><strong>公共托管服务：</strong>在运营方提供的地址注册登录，文件按账号隔离，适用运营方的限额和保留时间。公开试用仍在升级认证；<a href="${REPO}/blob/main/docs/hosted.md">查看可用状态与说明</a>。两种方式的账号、访问令牌和文件不互通。</p></section>
 
 <section aria-labelledby="use"><h2 id="use">适合什么场景？</h2>
 <ul><li>工作时截一张图，过一会儿在另一台电脑或手机取走。</li><li>把照片、链接或一段纯文字暂存在自己的池子，代替给自己发消息。</li><li>给别人发送单个内容的临时分享链接，不开放整个图片池。</li></ul>
@@ -70,7 +72,7 @@ export const aboutHTML = /* html */ `<!doctype html>
 <p>可选的 <a href="${REPO}/tree/main/mac">macOS 菜单栏客户端</a>支持自动上传新截图，需要 macOS 13+ 和本地构建。iPhone 上可按 <a href="${REPO}/tree/main/shortcut">iOS 快捷指令教程</a>从其他 App 分享图片到池子。</p></section>
 
 <section aria-labelledby="setup"><h2 id="setup">如何自部署 shotsync？</h2>
-<p>后端由一个 Cloudflare Worker 和一个 R2 存储桶组成。你需要自己的 Cloudflare 账号、启用 R2，以及能运行项目工具链的 Node.js 环境。</p>
+<p>默认自部署后端只有一个 Cloudflare Worker 和一个 R2 存储桶，不需要 D1、Supabase 或邮件服务。你需要自己的 Cloudflare 账号、启用 R2，以及 Node.js 22+ 环境。</p>
 <ol><li>从 <a href="${REPO}">GitHub 仓库</a>克隆源码，安装依赖，使用 Wrangler 登录自己的 Cloudflare 账号。</li><li>创建 R2 存储桶，使其名称与项目的 <code>wrangler.toml</code> 配置一致。</li><li>生成足够长的随机 token，通过 Wrangler secret 设置 <code>AUTH_TOKEN</code>，然后部署 Worker。</li><li>在每台设备打开部署地址，输入同一个 token。</li><li>在 R2 的 Object lifecycle rules 中设置创建 30 天后删除对象。</li></ol>
 <p><strong>30 天删除需要你配置 R2 生命周期规则，Worker 本身不会自动建立这条规则。</strong>重要文件请保留其他副本。完整命令及配置以 <a href="${REPO}#deploy-your-own-5-min">仓库部署说明</a>为准。</p>
 <p>代码采用 MIT 许可证。运行费用由你的 Cloudflare 用量和当前套餐决定，免费额度并不代表无限使用；部署前查看 <a href="https://developers.cloudflare.com/workers/platform/pricing/">Workers</a> 和 <a href="https://developers.cloudflare.com/r2/pricing/">R2 官方计费说明</a>。</p></section>
@@ -86,6 +88,7 @@ export const aboutHTML = /* html */ `<!doctype html>
 <section aria-labelledby="faq"><h2 id="faq">常见问题</h2>
 <h3>发送设备必须一直开着吗？</h3><p>不用。上传完成后，另一台设备可以稍后通过互联网取回，直到内容被手动删除或被 R2 生命周期规则清理。</p>
 <h3>能直接用公开演示同步自己的截图吗？</h3><p>不能。演示是只读样例池；自己的数据应放在自己部署的实例中。</p>
+<h3>自部署需要注册账号或申请 Supabase 密钥吗？</h3><p>不需要。默认部署使用你设置的访问 token；它不是 Cloudflare API Token。账号体系只用于独立的多用户托管服务。</p>
 <h3>token 泄露了怎么办？</h3><p>在自己的 Worker 上更新 <code>AUTH_TOKEN</code>，并在各设备重新输入。更新 token 也会使此前签发的分享链接失效。</p>
 <h3>为什么上传后另一台设备看不到？</h3><p>先确认两台设备打开的是同一个部署地址，token 一致，上传已成功。等待一次自动刷新；如果仍失败，检查浏览器请求及 Worker 日志。仅打开网页不能完成设备间同步，内容必须先上传成功。</p></section>
 
