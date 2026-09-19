@@ -1,30 +1,77 @@
 import { chromium, expect } from '@playwright/test';
-import { execFileSync, spawn } from 'node:child_process';
-import { pbkdf2Sync, createHmac } from 'node:crypto';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Miniflare, Response as MiniflareResponse } from 'miniflare';
+import { readD1Migrations } from '@cloudflare/vitest-pool-workers/config';
 const temp = mkdtempSync(join(tmpdir(), 'shotsync-browser-'));
 const origin = 'https://localhost:8788';
-const cli = 'node_modules/wrangler/bin/wrangler.js';
-const common = ['--config','wrangler.hosted.jsonc','--persist-to',join(temp,'state')];
-const run = args => execFileSync(process.execPath,[cli,...args],{stdio:'pipe'});
+const providerOrigin = 'https://abcdefghijklmnopqrst.supabase.co';
+const secret = 'sb_secret_browserfixture123456789';
+const password = 'browser-fixture-password';
+const fixtureId = '11111111-2222-4333-8444-555555555555';
+const providerUsers = new Map([[fixtureId, { id: fixtureId, email: 'browser@example.com', password,
+ app_metadata: { shotsync_origin: origin, shotsync_user_id: fixtureId } }]]);
+const providerCalls = [];
+const json = (value, status = 200) => MiniflareResponse.json(value, { status });
+// Fake only the external services. Requests still traverse the bundled Worker,
+// its real D1/R2 bindings, session cookies, identity validation and recovery flow.
+async function outbound(request) {
+ const url = new URL(request.url);
+ if (url.origin === 'https://challenges.cloudflare.com' && url.pathname === '/turnstile/v0/siteverify') {
+  const body = await request.formData();
+  return json({ success: body.get('secret') === 'fixture-turnstile-secret' && body.get('response') === 'fixture-challenge', hostname: 'localhost' });
+ }
+ if (url.origin !== providerOrigin) throw new Error('Unexpected browser fixture outbound origin');
+ expect(request.headers.get('apikey')).toBe(secret);
+ expect(request.headers.has('Authorization')).toBe(false);
+ providerCalls.push(`${request.method} ${url.pathname}`);
+ const body = request.method === 'GET' ? null : await request.json();
+ const publicUser = user => ({ id: user.id, email: user.email, app_metadata: user.app_metadata });
+ if (url.pathname === '/auth/v1/token' && request.method === 'POST') {
+  const user = [...providerUsers.values()].find(user => user.email === body.email && user.password === body.password);
+  return user ? json({ user: publicUser(user) }) : json({ error_code: 'invalid_credentials' }, 400);
+ }
+ if (url.pathname === '/auth/v1/admin/users' && request.method === 'POST') {
+  expect(body.email_confirm).toBe(true);
+  if ([...providerUsers.values()].some(user => user.email === body.email)) return json({ error_code: 'email_exists' }, 422);
+  providerUsers.set(body.id, body);
+  return json(publicUser(body));
+ }
+ const id = url.pathname.match(/^\/auth\/v1\/admin\/users\/([a-f0-9-]+)$/)?.[1];
+ const user = providerUsers.get(id);
+ if (!user) return json({ error_code: 'user_not_found' }, 404);
+ if (request.method === 'PUT') {
+  user.password = body.password;
+  if (body.app_metadata) user.app_metadata = { ...user.app_metadata, ...body.app_metadata };
+ }
+ return json(publicUser(user));
+}
 let server, browser;
 try {
- run(['d1','migrations','apply','shotsync-hosted','--local',...common]);
- const password='browser-fixture-password';
- // Valid format salt; test account exists only in the temporary local database.
- const validSalt='a'.repeat(64), pepper='b'.repeat(64);
- const validHash='pbkdf2-sha256:v1:100000:'+validSalt+':'+createHmac('sha256',Buffer.from(pepper,'hex')).update(pbkdf2Sync(password,Buffer.from(validSalt,'hex'),100000,32,'sha256')).digest('hex');
- const sql=join(temp,'fixture.sql');
- writeFileSync(sql,`INSERT INTO users(id,email,password_hash,verified_at,created_at) VALUES('browser','browser@example.com','${validHash}',NULL,1);`);
- run(['d1','execute','shotsync-hosted','--local','--file',sql,...common]);
- server=spawn(process.execPath,[cli,'dev','--local','--ip','127.0.0.1','--local-protocol','https','--port','8788','--var','PUBLIC_ORIGIN:'+origin,'--var','TURNSTILE_SITE_KEY:','--var','PASSWORD_PEPPER:'+pepper,...common],{stdio:['ignore','pipe','pipe']});
- let output='';server.stdout.on('data',x=>output+=x);server.stderr.on('data',x=>output+=x);
- await new Promise((resolve,reject)=>{const started=Date.now();const timer=setInterval(()=>{if(output.includes('Ready on')){clearInterval(timer);resolve();}else if(server.exitCode!==null||Date.now()-started>30000){clearInterval(timer);reject(new Error(output));}},100);});
+ execFileSync(process.execPath, ['node_modules/wrangler/bin/wrangler.js', 'deploy', '--dry-run', '--config', 'wrangler.hosted.jsonc', '--outdir', join(temp, 'build')], { stdio: 'pipe' });
+ server = new Miniflare({
+  modules: true, modulesRoot: join(temp, 'build'), scriptPath: join(temp, 'build', 'index.js'), compatibilityDate: '2026-08-22', compatibilityFlags: ['nodejs_compat'],
+  host: '127.0.0.1', port: 8788, https: true, cf: false,
+  d1Databases: ['DB'], r2Buckets: ['BUCKET'],
+  bindings: { PUBLIC_ORIGIN: origin, SUPABASE_URL: providerOrigin, SUPABASE_SECRET_KEY: secret,
+   TURNSTILE_SITE_KEY: 'fixture-site-key', TURNSTILE_SECRET_KEY: 'fixture-turnstile-secret', REGISTRATION_LIMIT: '100', UPLOADS_ENABLED: '1' },
+  outboundService: outbound,
+ });
+ await server.ready;
+ const db = await server.getD1Database('DB');
+ for (const migration of await readD1Migrations('migrations')) await db.batch(migration.queries.map(query => db.prepare(query)));
+ await db.prepare("INSERT INTO users(id,email,password_hash,verified_at,created_at,auth_provider_id,auth_state) VALUES(?,?,'external:supabase',NULL,1,?,'active')")
+  .bind(fixtureId, 'browser@example.com', fixtureId).run();
  browser=await chromium.launch({headless:true});
  const context=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:390,height:844}});
- const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ const page=await context.newPage();
+ // Deterministic challenge UI only; the Worker still calls and checks siteverify.
+ await page.route('https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit', route => route.fulfill({
+  contentType: 'application/javascript', body: "window.turnstile={render:(selector,options)=>{window.fixtureCaptcha=options;options.callback('fixture-challenge');return 'fixture-widget';},reset:()=>window.fixtureCaptcha.callback('fixture-challenge')};",
+ }));
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(origin);
  await page.locator('#email').fill('browser@example.com');await page.locator('#password').fill(password);await page.locator('#auth-submit').click();
  await expect(page.locator('#app')).toBeVisible();
@@ -44,25 +91,28 @@ try {
  await page.screenshot({path:join(temp,'mobile.png'),fullPage:true});
  page.on('dialog',dialog=>dialog.accept());await page.getByRole('button',{name:'删除',exact:true}).click();await expect(page.locator('.tile')).toHaveCount(0);
  await page.locator('#logout').click();await expect(page.locator('#auth')).toBeVisible();expect(await page.locator('#token-value').textContent()).toBe('');
- // UI-only recovery contracts; real registration/reset security is exercised by Workers tests.
- const recovery='a'.repeat(64),replacement='b'.repeat(64);
- await page.route('**/api/account/register',route=>route.fulfill({status:201,contentType:'application/json',body:JSON.stringify({ok:true,recoveryCode:recovery})}));
- await page.route('**/api/account/reset-password',route=>{
-  expect(route.request().postDataJSON()).toMatchObject({email:'new@example.com',recoveryCode:recovery,password:'replacement-password'});
-  return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({ok:true,recoveryCode:replacement})});
- });
  await page.locator('#tab-register').click();await page.locator('#email').fill('new@example.com');await page.locator('#password').fill(password);await page.locator('#auth-submit').click();
+ await expect(page.locator('#recovery-result')).toBeVisible();
+ const recovery=await page.locator('#recovery-value').textContent();expect(recovery).toMatch(/^[a-f0-9]{64}$/);
  await expect(page.locator('#recovery-value')).toHaveText(recovery);await expect(page.locator('#finish-recovery')).toBeDisabled();
  expect(await page.locator('#password').inputValue()).toBe('');
  await page.locator('#recovery-saved').check();await page.locator('#finish-recovery').click();await expect(page.locator('#recovery-value')).toHaveText('');
  await page.locator('#forgot').click();await page.locator('#recovery-code').fill(recovery);await page.locator('#password').fill('replacement-password');await page.locator('#auth-submit').click();
+ await expect(page.locator('#recovery-result')).toBeVisible();
+ const replacement=await page.locator('#recovery-value').textContent();expect(replacement).toMatch(/^[a-f0-9]{64}$/);expect(replacement).not.toBe(recovery);
  await expect(page.locator('#recovery-value')).toHaveText(replacement);await expect(page.locator('#finish-recovery')).toBeDisabled();
  expect(await page.locator('#recovery-code').inputValue()).toBe('');
  await page.locator('#recovery-saved').check();await page.locator('#finish-recovery').click();await expect(page.locator('#recovery-value')).toHaveText('');
+ await page.locator('#password').fill('replacement-password');await page.locator('#auth-submit').click();
+ await expect(page.locator('#app')).toBeVisible();
+ expect(providerCalls).toContain('POST /auth/v1/admin/users');
+ expect(providerCalls.some(call=>call.startsWith('PUT /auth/v1/admin/users/'))).toBe(true);
+ const registered=await db.prepare('SELECT password_hash,auth_state,verified_at FROM users WHERE email=?').bind('new@example.com').first();
+ expect(registered).toMatchObject({password_hash:'external:supabase',auth_state:'active',verified_at:null});
  expect(await page.evaluate(()=>localStorage.length)).toBe(0);expect(errors).toEqual([]);
- console.log('PASS: real browser unverified-account login, upload, private preview, device token, anonymous isolation, share/revoke, delete and logout; mocked registration/recovery UI saves and clears recovery codes');
+ console.log('PASS: real browser unverified-account login, upload, private preview, device token, anonymous isolation, share/revoke, delete and logout; real registration/recovery stores external identity and rotates recovery codes, with fake provider/Turnstile only at outbound boundaries');
  await privateContext.close();await context.close();
 } finally {
- if(browser)await browser.close();if(server)server.kill('SIGTERM');
+ if(browser)await browser.close();if(server)await server.dispose();
  rmSync(temp,{recursive:true,force:true});
 }

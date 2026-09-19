@@ -146,3 +146,5 @@ npm run dev       # local dev — create a .dev.vars with AUTH_TOKEN=<anything>
 ## Hosted accounts (public beta)
 
 An optional, separate hosted deployment supports email/password accounts with recovery codes (no email delivery), private file pools, revocable device tokens and strict account/global usage limits. [Try the hosted beta](https://shotsync-hosted.defiabell.workers.dev) (100 accounts). It runs on Workers Free, but measured login CPU exceeds the nominal free budget and may be throttled under load. Deployment prerequisites and limits are in [docs/hosted.md](docs/hosted.md). Existing self-hosted and read-only demo deployments keep their current behavior. Tooling now requires Node.js 22+.
+
+The next managed-auth version delegates password work to Supabase Auth; deployment requires a dedicated personal project and is blocked until its configuration is supplied. See the migration and failure-recovery notes in the hosted guide.
