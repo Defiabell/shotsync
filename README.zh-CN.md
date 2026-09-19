@@ -134,3 +134,7 @@ npm run dev       # 本地开发 —— 建一个含 AUTH_TOKEN=<任意串> 的 
 ## License
 
 [MIT](LICENSE)
+
+## 托管账号版（已实现，待上线）
+
+可独立部署邮箱注册／验证／找回、多用户文件隔离、设备令牌和账号／全站限额。公开托管服务尚未开放；发信域名与部署准备见 [docs/hosted.md](docs/hosted.md)。现有自部署和只读 demo 保持原有使用方式；开发工具链需要 Node.js 22+。
