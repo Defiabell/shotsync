@@ -17,7 +17,7 @@ try {
  const validSalt='a'.repeat(64);
  const validHash='scrypt:16384:8:5:'+validSalt+':'+scryptSync(password,validSalt,32,{N:16384,r:8,p:5,maxmem:32*1024*1024}).toString('hex');
  const sql=join(temp,'fixture.sql');
- writeFileSync(sql,`INSERT INTO users(id,email,password_hash,verified_at,created_at) VALUES('browser','browser@example.com','${validHash}',1,1);`);
+ writeFileSync(sql,`INSERT INTO users(id,email,password_hash,verified_at,created_at) VALUES('browser','browser@example.com','${validHash}',NULL,1);`);
  run(['d1','execute','shotsync-hosted','--local','--file',sql,...common]);
  server=spawn(process.execPath,[cli,'dev','--local','--ip','127.0.0.1','--local-protocol','https','--port','8788','--var','PUBLIC_ORIGIN:'+origin,...common],{stdio:['ignore','pipe','pipe']});
  let output='';server.stdout.on('data',x=>output+=x);server.stderr.on('data',x=>output+=x);
@@ -44,8 +44,23 @@ try {
  await page.screenshot({path:join(temp,'mobile.png'),fullPage:true});
  page.on('dialog',dialog=>dialog.accept());await page.getByRole('button',{name:'删除',exact:true}).click();await expect(page.locator('.tile')).toHaveCount(0);
  await page.locator('#logout').click();await expect(page.locator('#auth')).toBeVisible();expect(await page.locator('#token-value').textContent()).toBe('');
+ // UI-only recovery contracts; real registration/reset security is exercised by Workers tests.
+ const recovery='a'.repeat(64),replacement='b'.repeat(64);
+ await page.route('**/api/account/register',route=>route.fulfill({status:201,contentType:'application/json',body:JSON.stringify({ok:true,recoveryCode:recovery})}));
+ await page.route('**/api/account/reset-password',route=>{
+  expect(route.request().postDataJSON()).toMatchObject({email:'new@example.com',recoveryCode:recovery,password:'replacement-password'});
+  return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({ok:true,recoveryCode:replacement})});
+ });
+ await page.locator('#tab-register').click();await page.locator('#email').fill('new@example.com');await page.locator('#password').fill(password);await page.locator('#auth-submit').click();
+ await expect(page.locator('#recovery-value')).toHaveText(recovery);await expect(page.locator('#finish-recovery')).toBeDisabled();
+ expect(await page.locator('#password').inputValue()).toBe('');
+ await page.locator('#recovery-saved').check();await page.locator('#finish-recovery').click();await expect(page.locator('#recovery-value')).toHaveText('');
+ await page.locator('#forgot').click();await page.locator('#recovery-code').fill(recovery);await page.locator('#password').fill('replacement-password');await page.locator('#auth-submit').click();
+ await expect(page.locator('#recovery-value')).toHaveText(replacement);await expect(page.locator('#finish-recovery')).toBeDisabled();
+ expect(await page.locator('#recovery-code').inputValue()).toBe('');
+ await page.locator('#recovery-saved').check();await page.locator('#finish-recovery').click();await expect(page.locator('#recovery-value')).toHaveText('');
  expect(await page.evaluate(()=>localStorage.length)).toBe(0);expect(errors).toEqual([]);
- console.log('PASS: real browser login, upload, private preview, device token, anonymous isolation, share/revoke, delete and logout');
+ console.log('PASS: real browser unverified-account login, upload, private preview, device token, anonymous isolation, share/revoke, delete and logout; mocked registration/recovery UI saves and clears recovery codes');
  await privateContext.close();await context.close();
 } finally {
  if(browser)await browser.close();if(server)server.kill('SIGTERM');

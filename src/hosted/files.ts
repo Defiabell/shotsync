@@ -102,7 +102,6 @@ export async function handleShared(request: Request, env: HostedEnv): Promise<Re
 }
 export async function handleFiles(request: Request, env: HostedEnv, user: Account): Promise<Response> {
   const url = new URL(request.url), path = url.pathname, method = request.method;
-  if (!user.verified) return error(403, '请先验证邮箱');
   if (path === '/api/upload' && method === 'POST') return upload(request, env, user);
   if (path === '/api/usage' && method === 'GET') return json(await getUsage(env, user));
   if (path === '/api/list' && method === 'GET') {

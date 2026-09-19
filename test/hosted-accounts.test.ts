@@ -1,15 +1,17 @@
 import { env } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HttpError } from '../src/hosted/http';
-import { authenticate, createPendingUser, cleanupAccounts, handleAccounts } from '../src/hosted/accounts';
+import { authenticate, createUser, cleanupAccounts, handleAccounts } from '../src/hosted/accounts';
 import { hashPassword, randomToken, tokenHash, verifyPassword, withPasswordWork } from '../src/hosted/account-crypto';
 import type { HostedEnv } from '../src/hosted/types';
 // @ts-expect-error Vite imports migration text for the real local D1 database.
 import schema from '../migrations/0001_accounts.sql?raw';
+// @ts-expect-error Vite imports migration text for the real local D1 database.
+import recoverySchema from '../migrations/0003_recovery.sql?raw';
 const db = (env as unknown as { DB: D1Database }).DB;
 const origin = 'https://shotsync.test';
 const password = 'a-long-password!';
-let sent: Array<{ text: string; to: string }>;
+
 let bindings: HostedEnv;
 let passwordHash: string;
 function request(route: string, body?: unknown, headers: Record<string, string> = {}, method?: string) {
@@ -29,16 +31,10 @@ async function login(email = 'person@example.com') {
   expect(response.status).toBe(200);
   return response.headers.get('Set-Cookie')!.split(';')[0];
 }
-async function issue(id: string, kind = 'verify', expires = Date.now() + 60000) {
-  const token = randomToken();
-  await db.prepare('INSERT INTO account_tokens(hash,user_id,kind,expires_at,auth_version) VALUES(?,?,?,?,0)').bind(await tokenHash(token), id, kind, expires).run();
-  return token;
-}
 beforeEach(async () => {
-  for (const statement of (schema as string).split(';').filter(s => s.trim())) await db.prepare(statement).run();
-  sent = [];
+  for (const statement of ((schema as string) + (recoverySchema as string)).split(';').filter(s => s.trim())) await db.prepare(statement).run();
   vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ success: true, hostname: 'shotsync.test' }));
-  bindings = { ...env, DB: db, EMAIL_FROM: 'noreply@shotsync.test', PUBLIC_ORIGIN: origin, TURNSTILE_SECRET_KEY: 'test-secret', REGISTRATION_LIMIT: '100', EMAIL: { send: async (mail: { text: string; to: string }) => { sent.push(mail); return { messageId: 'mock' }; } } } as unknown as HostedEnv;
+  bindings = { ...env, DB: db, PUBLIC_ORIGIN: origin, TURNSTILE_SECRET_KEY: 'test-secret', REGISTRATION_LIMIT: '100' } as unknown as HostedEnv;
   passwordHash = await hashPassword(password);
 });
 afterEach(() => vi.restoreAllMocks());
@@ -53,56 +49,6 @@ describe('hosted accounts with real D1', () => {
     expect((await call('login', {}, { Origin: 'https://evil.test' })).status).toBe(403);
     expect((await call('login', {}, { 'Content-Type': 'text/plain' })).status).toBe(415);
   });
-  it('registers pending accounts and sends only hashed expiring tokens to D1', async () => {
-    const mock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ success: true, hostname: 'shotsync.test' }));
-    const response = await call('register', { email: 'New@Example.com', password, turnstileToken: 'captcha' });
-    expect(response.status).toBe(200);
-    const user = await db.prepare('SELECT * FROM users WHERE email=?').bind('new@example.com').first();
-    expect(user?.verified_at).toBeNull();
-    expect(sent).toHaveLength(1);
-    const token = sent[0].text.match(/#verify=([a-f0-9]+)/)![1];
-    expect(await db.prepare('SELECT hash FROM account_tokens WHERE hash=?').bind(token).first()).toBeNull();
-    expect(await db.prepare('SELECT hash FROM account_tokens WHERE hash=?').bind(await tokenHash(token)).first()).not.toBeNull();
-    mock.mockRestore();
-  });
-  it('fails closed on wrong captcha hostname and missing mail config', async () => {
-    const mock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ success: true, hostname: 'attacker.test' }));
-    expect((await call('register', { email: 'person@example.com', password, turnstileToken: 'captcha' })).status).toBe(403);
-    bindings.EMAIL_FROM = '';
-    expect((await call('register', { email: 'person@example.com', password, turnstileToken: 'captcha' })).status).toBe(503);
-    expect(sent).toHaveLength(0);
-    mock.mockRestore();
-  });
-  it('atomically assigns final trial seat and does not reserve seats for pending users', async () => {
-    bindings.REGISTRATION_LIMIT = '1';
-    const a = await seed('a@example.com', false), b = await seed('b@example.com', false);
-    const ta = await issue(a), tb = await issue(b);
-    const responses = await Promise.all([call('verify', { token: ta, password }), call('verify', { token: tb, password })]);
-    expect(responses.filter(r => r.status === 200)).toHaveLength(1);
-    expect([409, 429]).toContain(responses.find(r => r.status !== 200)!.status);
-    const loser = responses[0].status !== 200 ? ta : tb;
-    expect((await call('verify', { token: loser, password })).status).toBe(409);
-    expect((await db.prepare('SELECT COUNT(*) n FROM users WHERE verified_at IS NOT NULL').first<{ n: number }>())!.n).toBe(1);
-    expect((await call('verify', { token: ta, password })).status).not.toBe(200);
-  });
-  it('verification chooses a fresh password and invalidates pre-verification sessions', async () => {
-    const id = await seed('person@example.com', false);
-    const oldCookie = await login();
-    const token = await issue(id);
-    expect((await call('verify', { token, password: 'new-owner-password' })).status).toBe(200);
-    expect(await authenticate(request('me', undefined, { Cookie: oldCookie }), bindings)).toBeNull();
-    expect((await call('login', { email: 'person@example.com', password })).status).toBe(401);
-    expect((await call('login', { email: 'person@example.com', password: 'new-owner-password' })).status).toBe(200);
-  });
-  it('sessions are secure; unverified accounts cannot create device tokens', async () => {
-    await seed('person@example.com', false);
-    const response = await call('login', { email: 'person@example.com', password });
-    expect(response.headers.get('Set-Cookie')).toMatch(/HttpOnly; Secure; SameSite=Lax/);
-    const cookie = response.headers.get('Set-Cookie')!.split(';')[0];
-    expect((await call('devices', { name: 'Mac' }, { Cookie: cookie })).status).toBe(403);
-    expect((await call('logout', {}, { Cookie: cookie })).status).toBe(200);
-    expect(await authenticate(request('me', undefined, { Cookie: cookie }), bindings)).toBeNull();
-  });
   it('device tokens are scoped, revocable, and cannot manage devices themselves', async () => {
     await seed();
     const cookie = await login();
@@ -114,40 +60,6 @@ describe('hosted accounts with real D1', () => {
     expect((await call('devices', undefined, { Authorization: `Bearer ${device.token}` })).status).toBe(401);
     await call(`devices/${device.id}`, undefined, { Cookie: cookie }, 'DELETE');
     expect(await authenticate(request('me', undefined, { Authorization: `Bearer ${device.token}` }), bindings)).toBeNull();
-  });
-  it('reset is one-time and revokes every session and device', async () => {
-    const id = await seed();
-    const cookie = await login();
-    const response = await call('devices', { name: 'Mac' }, { Cookie: cookie });
-    const { token: device } = await response.json() as { token: string };
-    const token = await issue(id, 'reset');
-    const [a, b] = await Promise.all([call('reset-password', { token, password: 'new-password-one' }), call('reset-password', { token, password: 'new-password-two' })]);
-    expect([a, b].filter(r => r.status === 200)).toHaveLength(1);
-    expect([400, 409, 429]).toContain([a, b].find(r => r.status !== 200)!.status);
-    expect((await call('reset-password', { token, password: 'new-password-three' })).status).toBe(400);
-    expect(await authenticate(request('me', undefined, { Cookie: cookie }), bindings)).toBeNull();
-    expect(await authenticate(request('me', undefined, { Authorization: `Bearer ${device}` }), bindings)).toBeNull();
-  });
-  it('expired reset tokens cannot change passwords', async () => {
-    const id = await seed();
-    const token = await issue(id, 'reset', Date.now() - 1);
-    expect((await call('reset-password', { token, password: 'new-owner-password' })).status).toBe(400);
-    expect(await login()).toContain('__Host-shotsync=');
-  });
-  it('email sends and login attempts are rate limited', async () => {
-    await seed();
-    for (let i = 0; i < 3; i++) expect((await call('forgot-password', { email: 'person@example.com', turnstileToken: 'captcha' })).status).toBe(200);
-    expect((await call('forgot-password', { email: 'person@example.com', turnstileToken: 'captcha' })).status).toBe(429);
-    expect(sent).toHaveLength(3);
-    for (let i = 0; i < 10; i++) expect((await call('login', { email: 'person@example.com', password: 'x' })).status).toBe(401);
-    expect((await call('login', { email: 'person@example.com', password })).status).toBe(429);
-  });
-  it('cleanup removes expired pending registrations but preserves verified accounts', async () => {
-    const a = await seed('old@example.com', false), b = await seed('verified@example.com');
-    await db.prepare('UPDATE users SET created_at=? WHERE id IN (?,?)').bind(Date.now() - 8 * 86400000, a, b).run();
-    await cleanupAccounts(db);
-    expect(await db.prepare('SELECT id FROM users WHERE id=?').bind(a).first()).toBeNull();
-    expect(await db.prepare('SELECT id FROM users WHERE id=?').bind(b).first()).not.toBeNull();
   });
   it('one account cannot revoke another account device', async () => {
     await seed();
@@ -166,15 +78,6 @@ describe('hosted accounts with real D1', () => {
     const responses = await Promise.all([call('devices', { name: 'a' }, { Cookie: cookie }), call('devices', { name: 'b' }, { Cookie: cookie })]);
     expect(responses.map(r => r.status).sort()).toEqual([201, 409]);
   });
-  it('mail failures invalidate the unsent credential without leaking provider details', async () => {
-    await seed();
-    bindings.EMAIL = { send: async () => { throw new Error('provider secret'); } } as unknown as SendEmail;
-    const response = await call('forgot-password', { email: 'person@example.com', turnstileToken: 'captcha' });
-    expect(response.status).toBe(503);
-    expect(await response.text()).not.toContain('provider secret');
-    expect((await db.prepare('SELECT COUNT(*) n FROM account_tokens').first<{ n: number }>())!.n).toBe(0);
-  });
-
   it('caps concurrent password work atomically and releases every lease', async () => {
     let release!: () => void;
     const held = new Promise<void>(resolve => { release = resolve; });
@@ -196,51 +99,102 @@ describe('hosted accounts with real D1', () => {
     expect((await db.prepare('SELECT COUNT(*) n FROM password_leases').first<{ n: number }>())!.n).toBe(0);
   });
 
-  it('exhausted global mail allowance blocks new records before password work', async () => {
-    const window = Math.floor(Date.now() / 86400000);
-    await db.prepare('INSERT INTO rate_limits(key,window,n,expires_at) VALUES(?,?,?,?)').bind('account:mail-global', window, 200, (window + 1) * 86400000).run();
-    const response = await call('register', { email: 'new@example.com', password, turnstileToken: 'captcha' });
-    expect(response.status).toBe(429);
-    expect(await db.prepare('SELECT id FROM users').first()).toBeNull();
-    expect(await db.prepare('SELECT n FROM rate_limits WHERE key=?').bind('account:password-global').first()).toBeNull();
-    expect(sent).toHaveLength(0);
+  it('registers immediately usable accounts without email delivery and stores only the recovery hash', async () => {
+    const response = await call('register', { email: 'New@Example.com', password, turnstileToken: 'captcha' });
+    expect(response.status).toBe(201);
+    const { recoveryCode } = await response.json() as { recoveryCode: string };
+    expect(recoveryCode).toMatch(/^[a-f0-9]{64}$/);
+    const user = await db.prepare('SELECT * FROM users WHERE email=?').bind('new@example.com').first();
+    expect(user?.verified_at).toBeNull();
+    expect(user?.recovery_hash).toBe(await tokenHash(recoveryCode));
+    expect(user?.recovery_hash).not.toBe(recoveryCode);
+    const cookie = await login('new@example.com');
+    expect((await authenticate(request('me', undefined, { Cookie: cookie }), bindings))?.verified).toBe(false);
+    expect((await call('devices', { name: 'Mac' }, { Cookie: cookie })).status).toBe(201);
+    expect((await db.prepare('SELECT COUNT(*) n FROM account_tokens').first<{ n: number }>())!.n).toBe(0);
   });
-  it('new pending registrations have a separate daily bound before hashing', async () => {
+  it('requires configured Turnstile and the correct challenge hostname', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ success: true, hostname: 'attacker.test' }));
+    expect((await call('register', { email: 'person@example.com', password, turnstileToken: 'captcha' })).status).toBe(403);
+    bindings.TURNSTILE_SECRET_KEY = '';
+    expect((await call('register', { email: 'person@example.com', password, turnstileToken: 'captcha' })).status).toBe(503);
+  });
+  it('atomically admits only one account into the final trial slot including unverified accounts', async () => {
+    await seed('existing@example.com', false);
+    const results = await Promise.all([
+      createUser(db, 'a', 'a@example.com', passwordHash, await tokenHash(randomToken()), 2),
+      createUser(db, 'b', 'b@example.com', passwordHash, await tokenHash(randomToken()), 2),
+    ]);
+    expect(results.sort()).toEqual([false, true]);
+    expect((await db.prepare('SELECT COUNT(*) n FROM users').first<{ n: number }>())!.n).toBe(2);
+    bindings.REGISTRATION_LIMIT = '2';
+    expect((await call('register', { email: 'c@example.com', password, turnstileToken: 'captcha' })).status).toBe(409);
+  });
+  it('does not overwrite an existing account or disclose its recovery code', async () => {
+    const id = await seed('person@example.com', false);
+    const response = await call('register', { email: 'person@example.com', password: 'attacker-password', turnstileToken: 'captcha' });
+    expect(response.status).toBe(409);
+    expect(await response.text()).not.toContain('recoveryCode');
+    expect((await db.prepare('SELECT password_hash FROM users WHERE id=?').bind(id).first())?.password_hash).toBe(passwordHash);
+  });
+  it('recovery rotates once, invalidates every old credential, and accepts only the new code next time', async () => {
+    const id = await seed('person@example.com', false), recoveryCode = randomToken();
+    await db.prepare('UPDATE users SET recovery_hash=? WHERE id=?').bind(await tokenHash(recoveryCode), id).run();
+    const cookie = await login();
+    const deviceResponse = await call('devices', { name: 'Mac' }, { Cookie: cookie });
+    const { token: device } = await deviceResponse.json() as { token: string };
+    const reset = (code: string) => call('reset-password', { email: 'person@example.com', recoveryCode: code, password: 'new-owner-password', turnstileToken: 'captcha' });
+    const responses = await Promise.all([reset(recoveryCode), reset(recoveryCode)]);
+    expect(responses.filter(r => r.status === 200)).toHaveLength(1);
+    expect([400, 409, 429]).toContain(responses.find(r => r.status !== 200)!.status);
+    const { recoveryCode: next } = await responses.find(r => r.status === 200)!.json() as { recoveryCode: string };
+    expect(next).not.toBe(recoveryCode);
+    expect((await reset(recoveryCode)).status).toBe(400);
+    expect(await authenticate(request('me', undefined, { Cookie: cookie }), bindings)).toBeNull();
+    expect(await authenticate(request('me', undefined, { Authorization: `Bearer ${device}` }), bindings)).toBeNull();
+    expect((await call('login', { email: 'person@example.com', password })).status).toBe(401);
+    expect((await call('login', { email: 'person@example.com', password: 'new-owner-password' })).status).toBe(200);
+    expect((await reset(next)).status).toBe(200);
+    expect((await db.prepare('SELECT verified_at FROM users WHERE id=?').bind(id).first())?.verified_at).toBeNull();
+  });
+  it('wrong recovery credentials cannot reset an account and attempts are rate limited', async () => {
+    await seed('person@example.com', false);
+    for (let i = 0; i < 5; i++) expect((await call('reset-password', { email: 'person@example.com', recoveryCode: randomToken(), password, turnstileToken: 'captcha' })).status).toBe(400);
+    expect((await call('reset-password', { email: 'person@example.com', recoveryCode: randomToken(), password, turnstileToken: 'captcha' })).status).toBe(429);
+    expect(await login()).toContain('__Host-shotsync=');
+  });
+  it('cleanup retains active unverified accounts and removes expired sessions', async () => {
+    const id = await seed('person@example.com', false);
+    await db.prepare('UPDATE users SET created_at=? WHERE id=?').bind(Date.now() - 30 * 86400000, id).run();
+    await db.prepare('INSERT INTO sessions(hash,user_id,expires_at,auth_version) VALUES(?,?,?,0)').bind(randomToken(), id, Date.now() - 1).run();
+    await cleanupAccounts(db);
+    expect(await db.prepare('SELECT id FROM users WHERE id=?').bind(id).first()).not.toBeNull();
+    expect(await db.prepare('SELECT hash FROM sessions').first()).toBeNull();
+  });
+  it('bounds daily registration attempts before expensive password work', async () => {
     const window = Math.floor(Date.now() / 86400000);
-    await db.prepare('INSERT INTO rate_limits(key,window,n,expires_at) VALUES(?,?,?,?)').bind('account:pending-registrations', window, 200, (window + 1) * 86400000).run();
+    await db.prepare('INSERT INTO rate_limits(key,window,n,expires_at) VALUES(?,?,?,?)').bind('account:registrations', window, 200, (window + 1) * 86400000).run();
     expect((await call('register', { email: 'new@example.com', password, turnstileToken: 'captcha' })).status).toBe(429);
     expect(await db.prepare('SELECT id FROM users').first()).toBeNull();
     expect(await db.prepare('SELECT n FROM rate_limits WHERE key=?').bind('account:password-global').first()).toBeNull();
-    // Existing pending users can still request another verification email.
-    await seed('pending@example.com', false);
-    expect((await call('resend-verification', { email: 'pending@example.com', turnstileToken: 'captcha' })).status).toBe(200);
-    expect(sent).toHaveLength(1);
   });
-  it('atomically bounds the last pending slot separately from verified capacity', async () => {
-    const statements = Array.from({ length: 199 }, (_, i) => db.prepare('INSERT INTO users(id,email,password_hash,created_at) VALUES(?,?,?,?)').bind('pending-' + i, 'pending' + i + '@example.com', passwordHash, Date.now()));
-    await db.batch(statements);
-    await seed('verified@example.com', true);
-    await Promise.all([
-      createPendingUser(db, 'candidate-a', 'a@example.com', passwordHash, 100),
-      createPendingUser(db, 'candidate-b', 'b@example.com', passwordHash, 100),
-    ]);
-    expect((await db.prepare('SELECT COUNT(*) n FROM users WHERE verified_at IS NULL').first<{ n: number }>())!.n).toBe(200);
-    expect((await db.prepare('SELECT COUNT(*) n FROM users WHERE verified_at IS NOT NULL').first<{ n: number }>())!.n).toBe(1);
-    expect((await db.prepare("SELECT COUNT(*) n FROM users WHERE id IN ('candidate-a','candidate-b')").first<{ n: number }>())!.n).toBe(1);
+  it('secures sessions and invalidates them on logout', async () => {
+    await seed('person@example.com', false);
+    const response = await call('login', { email: 'person@example.com', password });
+    expect(response.headers.get('Set-Cookie')).toMatch(/HttpOnly; Secure; SameSite=Lax/);
+    const cookie = response.headers.get('Set-Cookie')!.split(';')[0];
+    expect((await call('logout', {}, { Cookie: cookie })).status).toBe(200);
+    expect(await authenticate(request('me', undefined, { Cookie: cookie }), bindings)).toBeNull();
   });
-  it('new registration reserves exactly one global email allowance', async () => {
-    expect((await call('register', { email: 'new@example.com', password, turnstileToken: 'captcha' })).status).toBe(200);
-    expect((await db.prepare('SELECT n FROM rate_limits WHERE key=?').bind('account:mail-global').first<{ n: number }>())!.n).toBe(1);
-    expect(sent).toHaveLength(1);
+  it('requires a fresh captcha for recovery and rate limits password guessing', async () => {
+    const id = await seed('person@example.com', false), recoveryCode = randomToken();
+    await db.prepare('UPDATE users SET recovery_hash=? WHERE id=?').bind(await tokenHash(recoveryCode), id).run();
+    expect((await call('reset-password', { email: 'person@example.com', recoveryCode, password })).status).toBe(403);
+    for (let i = 0; i < 10; i++) expect((await call('login', { email: 'person@example.com', password: 'x' })).status).toBe(401);
+    expect((await call('login', { email: 'person@example.com', password })).status).toBe(429);
+    expect((await db.prepare('SELECT recovery_hash FROM users WHERE id=?').bind(id).first())?.recovery_hash).toBe(await tokenHash(recoveryCode));
   });
-
-  it('cleanup preserves an old pending account while its emailed link remains valid', async () => {
-    const id = await seed('pending@example.com', false);
-    await db.prepare('UPDATE users SET created_at=? WHERE id=?').bind(Date.now() - 8 * 86400000, id).run();
-    const token = await issue(id);
-    await cleanupAccounts(db);
-    expect(await db.prepare('SELECT id FROM users WHERE id=?').bind(id).first()).not.toBeNull();
-    expect((await call('verify', { token, password })).status).toBe(200);
+  it('removes email verification and emailed password reset endpoints', async () => {
+    for (const route of ['verify', 'resend-verification', 'forgot-password']) expect((await call(route, {})).status).toBe(404);
   });
-
 });

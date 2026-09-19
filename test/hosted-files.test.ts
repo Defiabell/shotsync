@@ -6,7 +6,7 @@ import type { HostedEnv, Account } from '../src/hosted/types';
 import worker from '../src/hosted/index';
 const bindings = env as unknown as HostedEnv & { TEST_MIGRATIONS: D1Migration[] };
 const hosted = { ...bindings, PUBLIC_ORIGIN: 'https://shotsync.test', UPLOADS_ENABLED: '1' };
-const user: Account = { id: 'u1', email: 'one@example.com', verified: true, via: 'cookie' };
+const user: Account = { id: 'u1', email: 'one@example.com', verified: false, via: 'cookie' };
 const other: Account = { ...user, id: 'u2', email: 'two@example.com' };
 const origin = hosted.PUBLIC_ORIGIN;
 function req(path: string, method = 'GET') { return new Request(origin + path, { method, headers: { origin } }); }
@@ -17,7 +17,7 @@ async function upload(text = 'hello') {
 async function saved() { return (await (await upload()).json<{id:string}>()).id; }
 beforeEach(async () => {
  await applyD1Migrations(bindings.DB, bindings.TEST_MIGRATIONS);
- for (const u of [user, other]) await bindings.DB.prepare("INSERT INTO users(id,email,password_hash,verified_at,created_at) VALUES(?,?,'unused',1,1)").bind(u.id,u.email).run();
+ for (const u of [user, other]) await bindings.DB.prepare("INSERT INTO users(id,email,password_hash,verified_at,created_at) VALUES(?,?,'unused',NULL,1)").bind(u.id,u.email).run();
 });
 describe('hosted tenant isolation and exact quotas', () => {
  it('stores only user-scoped keys and denies other users list/read/delete/share', async () => {
@@ -27,8 +27,8 @@ describe('hosted tenant isolation and exact quotas', () => {
   const result = await handleFiles(req(`/i/${id}`),hosted,user); expect(await result.text()).toBe('hello'); expect(result.headers.get('cache-control')).toContain('no-store');
   expect((await bindings.BUCKET.list()).objects.map(x=>x.key)).toEqual([`users/u1/${id}/full`]);
  });
- it('rejects unverified writes and global paused uploads', async () => {
-  expect((await handleFiles(req('/api/upload','POST'),hosted,{...user,verified:false})).status).toBe(403);
+ it('allows unverified accounts but rejects globally paused uploads', async () => {
+  expect((await upload()).status).toBe(200);
   expect((await handleFiles(req('/api/upload','POST'),{...hosted,UPLOADS_ENABLED:'0'},user)).status).toBe(503);
  });
  it('deleting releases storage but not daily consumption', async () => {

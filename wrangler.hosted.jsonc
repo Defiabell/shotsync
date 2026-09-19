@@ -8,13 +8,11 @@
   "limits": {"cpu_ms": 1000},
   "vars": {
     "PUBLIC_ORIGIN": "http://localhost:8787",
-    "EMAIL_FROM": "",
     "TURNSTILE_SITE_KEY": "",
     "REGISTRATION_LIMIT": "100",
     "UPLOADS_ENABLED": "1"
   },
   "d1_databases": [{"binding": "DB", "database_name": "shotsync-hosted", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations"}],
   "r2_buckets": [{"binding": "BUCKET", "bucket_name": "shotsync-hosted"}],
-  "send_email": [{"name": "EMAIL"}],
   "triggers": {"crons": ["* * * * *"]}
 }
