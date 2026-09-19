@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:test';
+import { createHmac, pbkdf2Sync } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HttpError } from '../src/hosted/http';
 import { authenticate, createUser, cleanupAccounts, handleAccounts } from '../src/hosted/accounts';
@@ -11,6 +12,7 @@ import recoverySchema from '../migrations/0003_recovery.sql?raw';
 const db = (env as unknown as { DB: D1Database }).DB;
 const origin = 'https://shotsync.test';
 const password = 'a-long-password!';
+const pepper = 'ab'.repeat(32);
 
 let bindings: HostedEnv;
 let passwordHash: string;
@@ -34,16 +36,64 @@ async function login(email = 'person@example.com') {
 beforeEach(async () => {
   for (const statement of ((schema as string) + (recoverySchema as string)).split(';').filter(s => s.trim())) await db.prepare(statement).run();
   vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ success: true, hostname: 'shotsync.test' }));
-  bindings = { ...env, DB: db, PUBLIC_ORIGIN: origin, TURNSTILE_SECRET_KEY: 'test-secret', REGISTRATION_LIMIT: '100' } as unknown as HostedEnv;
-  passwordHash = await hashPassword(password);
+  bindings = { ...env, DB: db, PUBLIC_ORIGIN: origin, TURNSTILE_SECRET_KEY: 'test-secret', PASSWORD_PEPPER: pepper, REGISTRATION_LIMIT: '100' } as unknown as HostedEnv;
+  passwordHash = await hashPassword(password, pepper);
 });
 afterEach(() => vi.restoreAllMocks());
 describe('hosted accounts with real D1', () => {
-  it('uses a salted modern scrypt hash in the Worker runtime', async () => {
-    expect(passwordHash).toMatch(/^scrypt:16384:8:5:/);
-    expect(await verifyPassword(password, passwordHash)).toBe(true);
-    expect(await verifyPassword('wrong-password', passwordHash)).toBe(false);
-    expect(await hashPassword(password)).not.toBe(passwordHash);
+  it('uses a salted and peppered PBKDF2 verifier in the Worker runtime', async () => {
+    expect(passwordHash).toMatch(/^pbkdf2-sha256:v1:100000:[a-f0-9]{64}:[a-f0-9]{64}$/);
+    expect(await verifyPassword(password, passwordHash, pepper)).toBe(true);
+    expect(await verifyPassword('wrong-password', passwordHash, pepper)).toBe(false);
+    expect(await hashPassword(password, pepper)).not.toBe(passwordHash);
+  });
+  it('matches an independent PBKDF2/HMAC calculation and never stores the bare verifier', async () => {
+    const salt = passwordHash.split(':')[3];
+    const bare = pbkdf2Sync(password, Buffer.from(salt, 'hex'), 100_000, 32, 'sha256');
+    const expected = createHmac('sha256', Buffer.from(pepper, 'hex')).update(bare).digest('hex');
+    expect(passwordHash.split(':')[4]).toBe(expected);
+    expect(passwordHash).not.toContain(Buffer.from(bare).toString('hex'));
+    expect(await verifyPassword(password, passwordHash, 'cd'.repeat(32))).toBe(false);
+  });
+  it('rejects missing or malformed pepper before creating or authenticating accounts', async () => {
+    await seed();
+    for (const bad of ['', 'short', 'gg'.repeat(32), 'ab'.repeat(31)]) {
+      await expect(hashPassword(password, bad)).rejects.toMatchObject({ status: 503 });
+      await expect(verifyPassword(password, passwordHash, bad)).rejects.toMatchObject({ status: 503 });
+      bindings.PASSWORD_PEPPER = bad;
+      for (const route of ['login', 'register', 'reset-password']) {
+        expect((await call(route, { email: 'person@example.com', password, turnstileToken: 'captcha' })).status).toBe(503);
+      }
+    }
+    expect(await db.prepare('SELECT hash FROM sessions').first()).toBeNull();
+    expect((await db.prepare('SELECT COUNT(*) n FROM users').first())?.n).toBe(1);
+  });
+  it('rejects legacy hashes, unsupported versions, changed parameters and malformed values', async () => {
+    const salt = passwordHash.split(':')[3], digest = passwordHash.split(':')[4];
+    for (const stored of [
+      `scrypt:16384:8:5:${salt}:${digest}`,
+      passwordHash.replace(':v1:', ':v2:'),
+      passwordHash.replace(':100000:', ':1:'),
+      passwordHash.replace(salt, salt.slice(2)),
+      passwordHash.replace(digest, 'gg'.repeat(32)),
+      `${passwordHash}:extra`, '',
+    ]) expect(await verifyPassword(password, stored, pepper)).toBe(false);
+  });
+  it('performs password work for unknown addresses and never issues a session', async () => {
+    const derive = vi.spyOn(crypto.subtle, 'deriveBits');
+    expect((await call('login', { email: 'unknown@example.com', password })).status).toBe(401);
+    expect(derive).toHaveBeenCalledOnce();
+    expect(derive.mock.calls[0][0]).toMatchObject({ name: 'PBKDF2', hash: 'SHA-256', iterations: 100_000 });
+    expect(await db.prepare('SELECT hash FROM sessions').first()).toBeNull();
+  });
+  it('allows recovery from a legacy verifier without accepting the old hash', async () => {
+    const id = await seed(), recoveryCode = randomToken();
+    await db.prepare('UPDATE users SET password_hash=?,recovery_hash=? WHERE id=?')
+      .bind(`scrypt:16384:8:5:${'ab'.repeat(32)}:${'cd'.repeat(32)}`, await tokenHash(recoveryCode), id).run();
+    expect((await call('login', { email: 'person@example.com', password })).status).toBe(401);
+    expect((await call('reset-password', { email: 'person@example.com', recoveryCode, password, turnstileToken: 'captcha' })).status).toBe(200);
+    expect((await call('login', { email: 'person@example.com', password })).status).toBe(200);
+    expect((await db.prepare('SELECT password_hash FROM users WHERE id=?').bind(id).first())?.password_hash).toMatch(/^pbkdf2-sha256:v1:100000:/);
   });
   it('rejects cross-origin and form mutations', async () => {
     expect((await call('login', {}, { Origin: 'https://evil.test' })).status).toBe(403);

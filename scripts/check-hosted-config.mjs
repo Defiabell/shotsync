@@ -9,4 +9,4 @@ if(!c.vars.TURNSTILE_SITE_KEY)problems.push('TURNSTILE_SITE_KEY is required');
 if(!c.d1_databases?.[0]?.database_id || c.d1_databases[0].database_id==='00000000-0000-0000-0000-000000000000')problems.push('Set the dedicated hosted D1 database ID');
 if(c.name!=='shotsync-hosted' || c.r2_buckets?.[0]?.bucket_name!=='shotsync-hosted')problems.push('Hosted Worker and bucket must remain separate from personal/demo instances');
 if(problems.length){console.error(problems.join('\n'));process.exit(1);}
-console.log('Hosted config ready. Confirm Turnstile secret, bucket lifecycle, and deployment authorization before publishing.');
+console.log('Hosted config ready. Confirm PASSWORD_PEPPER and Turnstile secrets, bucket lifecycle, and deployment authorization before publishing.');

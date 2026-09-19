@@ -5,7 +5,7 @@ import { consumeRate, LIMITS } from '../src/hosted/limits';
 import type { HostedEnv, Account } from '../src/hosted/types';
 import worker from '../src/hosted/index';
 const bindings = env as unknown as HostedEnv & { TEST_MIGRATIONS: D1Migration[] };
-const hosted = { ...bindings, PUBLIC_ORIGIN: 'https://shotsync.test', UPLOADS_ENABLED: '1' };
+const hosted = { ...bindings, PASSWORD_PEPPER: 'ab'.repeat(32), PUBLIC_ORIGIN: 'https://shotsync.test', UPLOADS_ENABLED: '1' };
 const user: Account = { id: 'u1', email: 'one@example.com', verified: false, via: 'cookie' };
 const other: Account = { ...user, id: 'u2', email: 'two@example.com' };
 const origin = hosted.PUBLIC_ORIGIN;

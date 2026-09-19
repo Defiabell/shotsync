@@ -1,5 +1,5 @@
 import { HttpError } from './http';
-import { scrypt, timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual } from 'node:crypto';
 
 export function randomToken(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, '0')).join('');
@@ -7,22 +7,37 @@ export function randomToken(): string {
 export async function tokenHash(value: string): Promise<string> {
   return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))), b => b.toString(16).padStart(2, '0')).join('');
 }
-function derive(password: string, salt: string): Promise<Uint8Array> {
-  return new Promise((resolve, reject) => scrypt(password, salt, 32,
-    { N: 16384, r: 8, p: 5, maxmem: 32 * 1024 * 1024 },
-    (error, key) => error ? reject(error) : resolve(key)));
+const HASH_PREFIX = 'pbkdf2-sha256:v1:100000';
+const HEX_32 = /^[a-f0-9]{64}$/;
+function decodeHex(value: string): Uint8Array {
+  return Uint8Array.from(value.match(/../g)!, b => parseInt(b, 16));
 }
-export async function hashPassword(password: string): Promise<string> {
+export function validPasswordPepper(value: unknown): value is string {
+  return typeof value === 'string' && HEX_32.test(value);
+}
+function requirePepper(pepper: string): void {
+  if (!validPasswordPepper(pepper)) throw new HttpError(503, 'Password authentication is temporarily unavailable');
+}
+async function derive(password: string, salt: string, pepper: string): Promise<Uint8Array> {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+  const derived = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: decodeHex(salt), iterations: 100_000 }, key, 256);
+  const pepperKey = await crypto.subtle.importKey('raw', decodeHex(pepper), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  // Persist only the peppered verifier, never the intermediate PBKDF2 result.
+  return new Uint8Array(await crypto.subtle.sign('HMAC', pepperKey, derived));
+}
+export async function hashPassword(password: string, pepper: string): Promise<string> {
+  requirePepper(pepper);
   const salt = randomToken();
-  return `scrypt:16384:8:5:${salt}:${Array.from(await derive(password, salt), b => b.toString(16).padStart(2, '0')).join('')}`;
+  return `${HASH_PREFIX}:${salt}:${Array.from(await derive(password, salt, pepper), b => b.toString(16).padStart(2, '0')).join('')}`;
 }
-export async function verifyPassword(password: string, stored: string): Promise<boolean> {
+export async function verifyPassword(password: string, stored: string, pepper: string): Promise<boolean> {
+  requirePepper(pepper);
   const parts = stored.split(':');
-  if (parts.length !== 6 || parts.slice(0, 4).join(':') !== 'scrypt:16384:8:5' || !/^[a-f0-9]{64}$/.test(parts[4]) || !/^[a-f0-9]{64}$/.test(parts[5])) return false;
-  return timingSafeEqual(await derive(password, parts[4]), Uint8Array.from(parts[5].match(/../g)!, b => parseInt(b, 16)));
+  if (parts.length !== 5 || parts.slice(0, 3).join(':') !== HASH_PREFIX || !HEX_32.test(parts[3]) || !HEX_32.test(parts[4])) return false;
+  return timingSafeEqual(await derive(password, parts[3], pepper), decodeHex(parts[4]));
 }
 
-// Bound native scrypt memory across concurrent requests and recover abandoned work.
+// Bound expensive password work across requests and recover abandoned leases.
 export async function withPasswordWork<T>(db: D1Database, work: () => Promise<T>): Promise<T> {
   const id = crypto.randomUUID(), now = Date.now();
   const results = await db.batch([
