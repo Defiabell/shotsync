@@ -111,3 +111,5 @@ The setting applies to **new uploads**. Existing files keep their stored expiry 
 In `/api/list` and upload responses, `expiresAt: null` means no automatic expiry; `limits.retentionDays: 0` has the same meaning. Internally, only a ready file with `expires_at=0` is permanent; pending reservations always have a short timeout. Cleanup still removes pending/deleting records and expiring share links.
 
 Rollback constraint: after migration 0005, keep code that understands `storage_prefix` and permanent `expires_at=0`. Older Workers assume every object is under `users/`, and their cleanup treats zero as expired; rolling back to them can delete permanent files. Suspend uploads and repair forward instead of deploying an old cleanup implementation.
+
+The **📱 手机快捷入口设置** button is at the top of settings, before account quotas. It opens the phone guide for home-screen and Shortcuts setup.
