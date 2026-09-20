@@ -42,9 +42,9 @@ describe('hosted browser UI security and protocol', () => {
     expect(html).toContain("body.append('full',file)");
     expect(html).toContain("body.append('full',new Blob([value],{type:'text/plain'}),'text.txt')");
     for (const path of ['reset-password', '/api/account/me', '/api/account/devices', '/api/share/']) expect(html).toContain(path);
-    expect(html).toContain("preview.textContent=await blob.text()");
+    expect(html).toContain("entry.preview.textContent=text");
     expect(html).toContain("limits.storedBytes||209715200");
-    expect(html).toContain("['register','reset'].includes(mode)");
+    expect(html).toContain("['register','reset'].includes(submittedMode)");
     expect(html).toContain("finally{if(needsCaptcha){captchaToken=''");
     expect(html).toContain('最多 50 次');
   });
