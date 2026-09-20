@@ -220,7 +220,7 @@ try {
  expect(deleteRequests).toBe(2);await page.unroute('**/api/img/*');
  page.once('dialog',dialog=>dialog.accept());await page.locator('#delete-selected').click();await expect(page.locator('.tile')).toHaveCount(3);
  expect(deleteRequests).toBe(3);page.off('request',trackDelete);
- if(await page.locator('#cancel-selection').isVisible())await page.locator('#cancel-selection').click();
+ await expect(page.locator('#cancel-selection')).not.toBeVisible();await expect(page.locator('#select-items')).toBeVisible();
  page.on('dialog',dialog=>dialog.accept());
  while(await page.locator('.tile').count()){const remaining=await page.locator('.tile').count();await page.locator('.tile-open').first().click();await page.locator('#viewer-delete').click();await expect(page.locator('#viewer-dialog')).not.toBeVisible();await expect(page.locator('.tile')).toHaveCount(remaining-1);}
  // Account policy and object expiration must agree, including unlimited storage time.
