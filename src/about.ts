@@ -56,11 +56,11 @@ export const aboutHTML = /* html */ `<!doctype html>
 <main>
 <p>开源 · 自部署 · 跨设备暂存</p>
 <h1>shotsync：截图和文字，换台设备接着用。</h1>
-<p class="intro">shotsync 是一个运行在你自己的 Cloudflare 账号中的图片与文字暂存工具。在电脑上传截图，稍后从手机保存；在手机发一段文字，回到电脑复制。两台设备无需同时在线，也无需连接同一个 Wi-Fi。</p>
-<div class="actions"><a href="https://shotsync-demo.defiabell.workers.dev/">体验只读演示</a><a href="${REPO}#deploy-your-own-5-min">部署自己的 shotsync</a></div>
+<p class="intro">shotsync 是一个图片与文字暂存工具，可以直接使用在线版，也可以部署在自己的 Cloudflare 账号中。在电脑上传截图，稍后从手机保存；在手机发一段文字，回到电脑复制。两台设备无需同时在线，也无需连接同一个 Wi-Fi。</p>
+<div class="actions"><a href="https://shotsync-hosted.defiabell.workers.dev">直接使用在线版</a><a href="https://shotsync-demo.defiabell.workers.dev/">查看只读演示</a><a href="${REPO}#deploy-your-own-5-min">部署自己的 shotsync</a></div>
 <p class="note">演示站只有公开样例，不提供访客上传。自己部署是默认方式，无需注册账号或配置 Supabase；公共账号服务是另一个独立入口。</p>
 
-<section aria-labelledby="modes"><h2 id="modes">自己部署，还是直接使用服务？</h2><p><strong>自己部署：</strong>内容存放在你自己的 Cloudflare，输入一个访问令牌即可使用，无需邮箱、账号数据库或 Supabase。</p><p><strong>公共托管服务：</strong>在运营方提供的地址注册登录，文件按账号隔离，适用运营方的限额和保留时间。公开试用仍在升级认证；<a href="${REPO}/blob/main/docs/hosted.md">查看可用状态与说明</a>。两种方式的账号、访问令牌和文件不互通。</p></section>
+<section aria-labelledby="modes"><h2 id="modes">自己部署，还是直接使用服务？</h2><p><strong>自己部署：</strong>内容存放在你自己的 Cloudflare，输入一个访问令牌即可使用，无需邮箱、账号数据库或 Supabase。</p><p><strong>公共托管服务：</strong>在运营方提供的地址注册登录，文件按账号隔离，适用运营方的限额和保留时间。<a href="https://shotsync-hosted.defiabell.workers.dev">打开在线版</a>，邮箱＋密码注册，无需邮件验证，请保存恢复码。当前限 100 个账号试用，新账号默认保留 7 天；<a href="${REPO}/blob/main/docs/hosted.md">查看可用状态与说明</a>。两种方式的账号、访问令牌和文件不互通。</p><p>手机使用在线版，可按<a href="https://shotsync-hosted.defiabell.workers.dev/mobile">手机快捷入口设置</a>添加到主屏幕，以后点图标就能进入相册。</p></section>
 
 <section aria-labelledby="use"><h2 id="use">适合什么场景？</h2>
 <ul><li>工作时截一张图，过一会儿在另一台电脑或手机取走。</li><li>把照片、链接或一段纯文字暂存在自己的池子，代替给自己发消息。</li><li>给别人发送单个内容的临时分享链接，不开放整个图片池。</li></ul>
@@ -92,9 +92,9 @@ export const aboutHTML = /* html */ `<!doctype html>
 <h3>token 泄露了怎么办？</h3><p>在自己的 Worker 上更新 <code>AUTH_TOKEN</code>，并在各设备重新输入。更新 token 也会使此前签发的分享链接失效。</p>
 <h3>为什么上传后另一台设备看不到？</h3><p>先确认两台设备打开的是同一个部署地址，token 一致，上传已成功。等待一次自动刷新；如果仍失败，检查浏览器请求及 Worker 日志。仅打开网页不能完成设备间同步，内容必须先上传成功。</p></section>
 
-<section lang="en" aria-labelledby="english"><h2 id="english">What is shotsync?</h2><p>shotsync is an open-source, self-hosted image and text pool built with Cloudflare Workers and R2. Upload a screenshot or text snippet on one device and retrieve it later on another. The browser/PWA client uses one shared access token; optional macOS and iOS Shortcut integrations are available. Configure R2 lifecycle rules for 30-day retention. It is a personal transit pool, not an archive or a multi-user file service.</p></section>
+<section lang="en" aria-labelledby="english"><h2 id="english">What is shotsync?</h2><p>shotsync is an open-source, self-hosted image and text pool built with Cloudflare Workers and R2. Upload a screenshot or text snippet on one device and retrieve it later on another. The browser/PWA client uses one shared access token; optional macOS and iOS Shortcut integrations are available. Configure R2 lifecycle rules for 30-day retention. The default self-hosted mode is a personal transit pool. You can also <a href="https://shotsync-hosted.defiabell.workers.dev">use the hosted service</a> with an individual account, without deploying; its quotas and retention differ.</p></section>
 </main>
-<footer>由 <a href="https://github.com/Defiabell">Jinkun Sun</a> 开发 · <a href="${REPO}">开源代码与使用说明</a> · 内容核对：2026-09-18</footer>
+<footer>由 <a href="https://github.com/Defiabell">Jinkun Sun</a> 开发 · <a href="${REPO}">开源代码与使用说明</a> · 内容核对：2026-09-20</footer>
 </body></html>`;
 
 export function robotsTXT(isDemo: boolean): string {

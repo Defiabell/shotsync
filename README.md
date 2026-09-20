@@ -2,7 +2,9 @@ English | [简体中文](README.zh-CN.md)
 
 # shotsync
 
-Your own cross-device image & text pool, deployable to Cloudflare's free tier in a few minutes. Drop a screenshot or photo on one device, grab it on another. No app to install (the phone client is a PWA), no third-party image host — your data lives only in your own Cloudflare account.
+Your own cross-device image & text pool, deployable to Cloudflare's free tier in a few minutes. Drop a screenshot or photo on one device, grab it on another. No app to install (the phone client is a PWA), no third-party image host — when self-hosted, your data lives only in your own Cloudflare account.
+
+**[Use ShotSync online →](https://shotsync-hosted.defiabell.workers.dev)** No deployment needed. Sign up with an email and password to sync images and text. Beta limited to 100 accounts; new accounts keep files for 7 days by default.
 
 **🎬 Live demo (read-only sample pool): https://shotsync-demo.defiabell.workers.dev**
 
@@ -15,10 +17,20 @@ Your own cross-device image & text pool, deployable to Cloudflare's free tier in
 | Mode | Best for | Access | File storage |
 | --- | --- | --- | --- |
 | **Self-hosted (default)** | Your own image and text pool | Deploy, then enter your own `AUTH_TOKEN` | Your Cloudflare R2 |
-| Hosted service (beta) | Using the operator's service without deploying | Register/sign in at the hosted URL | The operator's Cloudflare R2 |
+| Hosted service (beta) | Using the operator's service without deploying | [Sign in or create an account](https://shotsync-hosted.defiabell.workers.dev) | The operator's Cloudflare R2 |
 | Read-only demo | Exploring the interface | Open the demo above; uploads are disabled | Public samples |
 
-For self-hosting, follow [the steps below](#deploy-your-own-5-min). See the [hosted guide](docs/hosted.md) for availability and quotas: the current beta still has a Free-plan CPU limitation and its authentication upgrade is not deployed. [Mode details and FAQ](docs/deployment-modes.md).
+For self-hosting, follow [the steps below](#deploy-your-own-5-min). See the [hosted guide](docs/hosted.md) for availability and quotas: the current beta still has a Free-plan CPU limitation and authentication now uses Supabase Auth. [Mode details and FAQ](docs/deployment-modes.md).
+
+## Start using the hosted service
+
+1. Open the [hosted service](https://shotsync-hosted.defiabell.workers.dev), register with an email and password, and save your recovery code. No email verification is required.
+2. Choose **+ 图片** to upload an image or **文字** to send text. Sign in to the same account on another device to retrieve it.
+3. Open settings to copy the gallery address, check quotas and retention, or generate a device token for the Mac app / iOS Shortcut.
+
+On a phone, follow the [home-screen shortcut guide](https://shotsync-hosted.defiabell.workers.dev/mobile) for iPhone or Android to open your gallery from an app icon.
+
+The read-only demo contains public samples and does not accept uploads. Hosted content is isolated by account; users do not need Cloudflare or Supabase configuration.
 
 ![shotsync gallery](docs/screenshot.png)
 

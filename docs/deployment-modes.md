@@ -17,15 +17,15 @@
 
 ## 可选：直接使用公共托管服务
 
-不想部署的用户可使用运营方提供的账号服务。浏览器通过邮箱和密码进入自己的文件池；文件存放在运营方的 Cloudflare 中，受服务人数、上传、存储和保留时间限制。使用者不需要开通 Cloudflare 或 Supabase。
+不想部署的用户可直接打开[ShotSync 在线版](https://shotsync-hosted.defiabell.workers.dev)，注册邮箱和密码，保存恢复码。浏览器通过邮箱和密码进入自己的文件池；文件存放在运营方的 Cloudflare 中，受服务人数、上传、存储和保留时间限制。使用者不需要开通 Cloudflare 或 Supabase。
 
 托管服务与自部署实例的数据、登录账号和访问令牌不互通，不会自动迁移或同步。Mac App／快捷指令应填写所选服务的地址：个人池使用共享 `AUTH_TOKEN`，托管服务使用登录后创建的设备令牌。
 
-当前公共服务仍为试用，原登录实现存在免费 CPU 限制，认证升级尚未部署；实际状态见[托管说明](hosted.md)。只读 demo 仅用于浏览公开样例，不接受上传，也不是公共账号服务。
+当前公共服务已接入 Supabase Auth，限 100 个账号试用，新账号默认保留 7 天；免费 CPU 容量限制仍需注意，实际状态见[托管说明](hosted.md)。只读 demo 仅用于浏览公开样例，不接受上传，也不是公共账号服务。
 
 ## 仅运营者：部署多用户账号服务
 
-[托管部署文档](hosted.md)面向想为多人运营服务的人。它有独立的 Worker 入口、D1 和 R2 资源；外部认证升级另需运营者的 Supabase 配置。不要把这套配置作为个人池的安装前提，也不要复制维护者的数据库 ID、存储桶或认证项目配置。
+[托管部署文档](hosted.md)面向想为多人运营服务的人。它有独立的 Worker 入口、D1 和 R2 资源；账号认证需要运营者的 Supabase 配置。不要把这套配置作为个人池的安装前提，也不要复制维护者的数据库 ID、存储桶或认证项目配置。
 
 | 命令 | 配置 | 部署内容 |
 | --- | --- | --- |
@@ -38,6 +38,6 @@
 
 Self-hosting remains the default: Worker + R2 + one shared `AUTH_TOKEN`. Run `npm run deploy`; no ShotSync account, Supabase, D1, email or CAPTCHA setup is required. Token holders share the entire pool. Configure the 30-day R2 lifecycle explicitly.
 
-The optional hosted service uses individual accounts and the operator's storage/quotas. Only its operator needs the extra infrastructure; end users sign in at that service's URL. Accounts, files and credentials are not automatically shared with personal deployments. The hosted beta is still undergoing an authentication upgrade; see its guide for current availability.
+The optional hosted service uses individual accounts and the operator's storage/quotas. Only its operator needs the extra infrastructure; end users sign in at that service's URL. Accounts, files and credentials are not automatically shared with personal deployments. [Open the hosted beta](https://shotsync-hosted.defiabell.workers.dev): authentication uses Supabase Auth, with a 100-account cap and 7-day default retention. See its guide for quotas and capacity limits.
 
 `npm run deploy:hosted` is an explicit, separate operator workflow. It never replaces the default personal deployment. The read-only demo is only for exploring sample content.

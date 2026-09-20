@@ -4,10 +4,13 @@ import { handleFiles, handleShared, cleanupFiles } from './files';
 import { consumeRate } from './limits';
 import { error, HttpError } from './http';
 import { hostedHTML } from './ui';
+import { mobileResponse } from './mobile';
 
 async function route(request: Request, env: HostedEnv): Promise<Response> {
   const url = new URL(request.url), path = url.pathname;
   if (url.origin !== env.PUBLIC_ORIGIN) return error(421, '请使用服务正式地址');
+  const mobile = mobileResponse(request, env);
+  if (mobile) return mobile;
   if (path === '/robots.txt') return new Response('User-agent: *\nDisallow: /\n');
   if ((path === '/' || path === '/account') && request.method === 'GET') {
     return new Response(hostedHTML(env), { headers: { 'content-type': 'text/html; charset=utf-8' } });

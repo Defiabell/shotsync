@@ -2,7 +2,9 @@
 
 # shotsync
 
-属于你自己的跨设备图片 & 文字中转池，几分钟就能部署到 Cloudflare 免费档。在一台设备上截图或存图，另一台设备随手就能拿到。手机端无需装 App（是 PWA），不经任何第三方图床——数据只待在你自己的 Cloudflare 账户里。
+属于你自己的跨设备图片 & 文字中转池，几分钟就能部署到 Cloudflare 免费档。在一台设备上截图或存图，另一台设备随手就能拿到。手机端无需装 App（是 PWA），不经任何第三方图床——自部署时，数据只待在你自己的 Cloudflare 账户里。
+
+**[直接使用在线版 →](https://shotsync-hosted.defiabell.workers.dev)** 无需部署，邮箱＋密码注册后即可同步图片和文字。免费试用限 100 个账号，新账号默认保留 7 天。
 
 **🎬 在线演示（只读示例池）：https://shotsync-demo.defiabell.workers.dev**
 
@@ -13,10 +15,20 @@
 | 方式 | 适合谁 | 如何进入 | 数据存放 |
 | --- | --- | --- | --- |
 | **自己部署（默认）** | 想拥有自己的图片与文字池 | 部署后输入自己设置的 `AUTH_TOKEN` | 自己的 Cloudflare R2 |
-| 公共托管服务（试用） | 不想部署，接受运营方存储数据和使用限额 | 在服务地址注册／登录 | 运营方的 Cloudflare R2 |
+| 公共托管服务（试用） | 不想部署，接受运营方存储数据和使用限额 | [注册／登录在线版](https://shotsync-hosted.defiabell.workers.dev) | 运营方的 Cloudflare R2 |
 | 只读演示 | 先看看界面 | 打开上方演示地址；不能上传 | 公开样例 |
 
-自部署按[下面的步骤](#自己部署约-5-分钟)操作即可。公共服务的可用状态和限额见[托管版说明](docs/hosted.md)；托管版目前仍有免费 CPU 限制，认证升级尚未上线。[模式区别与常见问题](docs/deployment-modes.md)。
+自部署按[下面的步骤](#自己部署约-5-分钟)操作即可。公共服务的可用状态和限额见[托管版说明](docs/hosted.md)；托管版目前仍有免费 CPU 限制，已接入 Supabase Auth。[模式区别与常见问题](docs/deployment-modes.md)。
+
+## 直接使用在线版
+
+1. 打开[在线版](https://shotsync-hosted.defiabell.workers.dev)，注册邮箱和密码，无需邮件验证；保存页面给出的恢复码。
+2. 点击「+ 图片」上传，或点击「文字」发送；另一台设备登录同一账号即可取回。
+3. 设置中可复制相册地址、查看额度和保留期，或生成设备令牌连接 Mac 客户端／快捷指令。
+
+手机用户可打开[手机快捷入口设置](https://shotsync-hosted.defiabell.workers.dev/mobile)，按 iPhone / Android 指引添加到主屏幕，以后点图标就能进入相册。
+
+只读 Demo 展示公开样例，不能上传；在线版的内容按账号隔离。使用在线版无需配置 Cloudflare 或 Supabase。
 
 ![shotsync gallery](docs/screenshot.png)
 
