@@ -26,7 +26,21 @@ For self-hosting, follow [the steps below](#deploy-your-own-5-min). See the [hos
 
 1. Open the [hosted service](https://shotsync-hosted.defiabell.workers.dev), register with an email and password, and save your recovery code. No email verification is required.
 2. Choose **+ 图片** to upload an image or **文字** to send text. Sign in to the same account on another device to retrieve it.
-3. Open settings to copy the gallery address, check quotas and retention, or generate a device token for the Mac app / iOS Shortcut.
+3. On a phone, open **⚙ Settings → 📱 手机快捷入口设置** at the top of settings and follow the home-screen guide. Tap the ShotSync icon to return later; the first launch may require signing in again.
+
+### Common actions
+
+| Task | Where to go |
+| --- | --- |
+| Send images or text | **+ 图片** / **文字** on the gallery; drag or paste images on desktop |
+| Retrieve or share content | Open an item → **取回** (download), **复制文字** (copy text) or **分享** (share) |
+| Delete several items | **选择** → select items → **删除选中** → confirm; failed items stay selected for retry |
+| Add a phone shortcut | **⚙ Settings → 📱 手机快捷入口设置** at the top; iPhone, Android and Shortcuts instructions |
+| Open on another device | **Settings → 连接其他设备 → 复制相册地址**; open the copied address and sign in to the same account |
+| Connect the Mac app / upload Shortcut | **Settings → 连接其他设备** → enter a device name and generate a token; configure the client with the gallery address and token |
+| Check quotas and retention | Account details in settings; new accounts default to 7 days, with the actual policy shown there |
+
+New device tokens are masked by default and can be revealed/copied again in the current page, even after closing settings. **Reloading the page or signing out clears them**, so save them in a password manager. If an existing token is unavailable, revoke it and generate another. Browser sign-in uses your email and password; it does not require a device token.
 
 On a phone, follow the [home-screen shortcut guide](https://shotsync-hosted.defiabell.workers.dev/mobile) for iPhone or Android to open your gallery from an app icon.
 
