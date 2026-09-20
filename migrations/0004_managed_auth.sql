@@ -8,3 +8,5 @@ CREATE TABLE auth_registrations (
   created_at INTEGER NOT NULL,
   state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','failed','complete'))
 );
+
+CREATE TABLE revoked_auth_sessions (session_id TEXT PRIMARY KEY, expires_at INTEGER NOT NULL);

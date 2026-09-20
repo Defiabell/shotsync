@@ -22,8 +22,12 @@ describe('hosted browser UI security and protocol', () => {
     expect(html).toContain("$('token-value').textContent=''");
     expect(html).toContain("$('recovery-value').textContent=''");
     expect(html).toContain("URL.revokeObjectURL(url)");
-    expect(html).toContain("if(response.status===401){clearPrivate()");
+    expect(html).toContain("if(response.status===401){if(stamp===generation){clearPrivate()");
     expect(html).toContain("cache:'no-store'");
+    expect(html).toContain("headers.set('Authorization','Bearer '+accessToken)");
+    expect(html).toContain("if(refreshPromise)return refreshPromise");
+    expect(html).toContain("const initialGeneration=generation;refreshSession()");
+    expect(html).toContain("accessToken='';expiresAt=0");
     expect(html).toContain('if(stamp!==generation)return');
   });
 

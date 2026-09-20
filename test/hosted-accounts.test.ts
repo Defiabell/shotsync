@@ -14,7 +14,13 @@ import managedSchema from '../migrations/0004_managed_auth.sql?raw';
 const db = (env as unknown as { DB: D1Database }).DB;
 const origin = 'https://shotsync.test';
 const password = 'a-long-password!';
-const providerUsers = new Map<string, { id: string; password: string }>();
+const providerUsers = new Map<string, { id: string; password: string; version: number }>();
+const sessions = new Map<string, provider.ProviderSession>();
+function issue(id: string, email = 'person@example.com', authVersion = 0) {
+  const token = `jwt.${randomToken()}.signature`;
+  const session = {id,email,authVersion,accessToken:token,refreshToken:randomToken(),expiresAt:Date.now()+3600000,sessionId:crypto.randomUUID()};
+  sessions.set(token,session); return session;
+}
 
 let bindings: HostedEnv;
 const passwordHash = 'external:supabase';
@@ -28,31 +34,34 @@ async function call(route: string, body?: unknown, headers?: Record<string, stri
 async function seed(email = 'person@example.com', verified = true) {
   const id = crypto.randomUUID();
   await db.prepare("INSERT INTO users(id,email,password_hash,verified_at,created_at,auth_provider_id,auth_state) VALUES(?,?,?,?,?,?,'active')").bind(id, email, passwordHash, verified ? Date.now() : null, Date.now(), id).run();
-  providerUsers.set(email, { id, password });
+  providerUsers.set(email, { id, password, version: 0 });
   return id;
 }
 async function login(email = 'person@example.com') {
   const response = await call('login', { email, password });
   expect(response.status).toBe(200);
-  return response.headers.get('Set-Cookie')!.split(';')[0];
+  return 'Bearer ' + (await response.json() as {accessToken:string}).accessToken;
 }
 beforeEach(async () => {
   for (const statement of ((schema as string) + (recoverySchema as string) + (managedSchema as string)).split(';').filter(s => s.trim())) await db.prepare(statement).run();
   vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ success: true, hostname: 'shotsync.test' }));
-  bindings = { ...env, DB: db, PUBLIC_ORIGIN: origin, TURNSTILE_SECRET_KEY: 'test-secret', SUPABASE_URL: 'https://abcdefghijklmnopqrst.supabase.co', SUPABASE_SECRET_KEY: 'sb_secret_test-provider-key', REGISTRATION_LIMIT: '100' } as unknown as HostedEnv;
-  providerUsers.clear();
-  vi.spyOn(provider, 'createPasswordUser').mockImplementation(async (_env, id, email, supplied) => {
+  bindings = { ...env, DB: db, PUBLIC_ORIGIN: origin, TURNSTILE_SECRET_KEY: 'test-secret', SUPABASE_URL: 'https://abcdefghijklmnopqrst.supabase.co', SUPABASE_SECRET_KEY: 'sb_secret_test-provider-key', SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_syntheticfixture123456789', REGISTRATION_LIMIT: '100' } as unknown as HostedEnv;
+  providerUsers.clear(); sessions.clear();
+  vi.spyOn(provider,'verifyAccessToken').mockImplementation(async (_env, token) => sessions.get(token) || null);
+  vi.spyOn(provider,'refreshProviderSession').mockImplementation(async (_env, token) => [...sessions.values()].find(s=>s.refreshToken===token) || null);
+  vi.spyOn(provider,'revokeProviderSession').mockResolvedValue();
+  vi.spyOn(provider, 'createPasswordUser').mockImplementation(async (_env, id, email, supplied, _operation, authVersion = 0) => {
     if (providerUsers.has(email)) throw new HttpError(503, 'Provider rejected request');
-    providerUsers.set(email, { id, password: supplied });
+    providerUsers.set(email, { id, password: supplied, version: authVersion });
   });
   vi.spyOn(provider, 'verifyProviderPassword').mockImplementation(async (_env, id, email, supplied) => {
     const remote = providerUsers.get(email);
-    return !!remote && remote.id === id && remote.password === supplied;
+    return remote && remote.id === id && remote.password === supplied ? issue(id,email,remote.version) : null;
   });
-  vi.spyOn(provider, 'updateProviderPassword').mockImplementation(async (_env, id, email, supplied) => {
+  vi.spyOn(provider, 'updateProviderPassword').mockImplementation(async (_env, id, email, supplied, _operation, authVersion = 0) => {
     const remote = providerUsers.get(email);
     if (!remote || remote.id !== id) throw new HttpError(503, 'Provider unavailable');
-    remote.password = supplied;
+    remote.password = supplied; remote.version = authVersion;
   });
 });
 afterEach(() => vi.restoreAllMocks());
@@ -73,7 +82,7 @@ describe('hosted accounts with real D1', () => {
   });
   it('does not link an unrelated provider identity by matching email', async () => {
     await seed();
-    providerUsers.set('person@example.com', { id: crypto.randomUUID(), password });
+    providerUsers.set('person@example.com', { id: crypto.randomUUID(), password, version: 0 });
     expect((await call('login', { email: 'person@example.com', password })).status).toBe(401);
   });
   it('provider outages never become invalid-password errors or local fallback', async () => {
@@ -116,13 +125,13 @@ describe('hosted accounts with real D1', () => {
     const id = await seed(), recoveryCode = randomToken();
     await db.prepare('UPDATE users SET recovery_hash=? WHERE id=?').bind(await tokenHash(recoveryCode), id).run();
     const cookie = await login();
-    const device = await (await call('devices', { name: 'old' }, { Cookie: cookie })).json() as { token: string };
+    const device = await (await call('devices', { name: 'old' }, { Authorization: cookie })).json() as { token: string };
     vi.mocked(provider.updateProviderPassword).mockRejectedValue(new HttpError(503, 'Provider timeout'));
     const body = { email: 'person@example.com', recoveryCode, password: 'new-owner-password', turnstileToken: 'captcha' };
     expect((await call('reset-password', body)).status).toBe(503);
-    expect(await authenticate(request('me', undefined, { Cookie: cookie }), bindings)).toBeNull();
+    expect(await authenticate(request('me', undefined, { Authorization: cookie }), bindings)).toBeNull();
     expect(await authenticate(request('me', undefined, { Authorization: 'Bearer ' + device.token }), bindings)).toBeNull();
-    expect((await call('devices', { name: 'forbidden' }, { Cookie: cookie })).status).toBe(401);
+    expect((await call('devices', { name: 'forbidden' }, { Authorization: cookie })).status).toBe(401);
     expect((await call('login', { email: 'person@example.com', password })).status).toBe(409);
     expect((await call('reset-password', { ...body, password: 'another-new-password' })).status).toBe(409);
     expect(provider.updateProviderPassword).toHaveBeenCalledOnce();
@@ -133,7 +142,7 @@ describe('hosted accounts with real D1', () => {
     const id = await seed();
     vi.mocked(provider.verifyProviderPassword).mockImplementationOnce(async () => {
       await db.prepare("UPDATE users SET auth_state='resetting',auth_version=auth_version+1 WHERE id=?").bind(id).run();
-      return true;
+      return issue(id);
     });
     const response = await call('login', { email: 'person@example.com', password });
     expect(response.status).toBe(409);
@@ -147,10 +156,10 @@ describe('hosted accounts with real D1', () => {
         db.prepare('UPDATE users SET auth_version=auth_version+1 WHERE id=?').bind(id),
         db.prepare('INSERT INTO sessions(hash,user_id,expires_at,auth_version) VALUES(?,?,?,1)').bind(await tokenHash(newToken), id, Date.now() + 60000),
       ]);
-      return true;
+      return issue(id);
     });
     expect((await call('login', { email: 'person@example.com', password })).status).toBe(409);
-    expect(await authenticate(request('me', undefined, { Cookie: '__Host-shotsync=' + newToken }), bindings)).not.toBeNull();
+    expect(await db.prepare('SELECT hash FROM sessions WHERE hash=?').bind(await tokenHash(newToken)).first()).not.toBeNull();
   });
   it('enforces the provider UTF-8 password boundary without truncation', async () => {
     const over = '中'.repeat(25), valid = '中'.repeat(24);
@@ -167,30 +176,30 @@ describe('hosted accounts with real D1', () => {
   it('device tokens are scoped, revocable, and cannot manage devices themselves', async () => {
     await seed();
     const cookie = await login();
-    const created = await call('devices', { name: 'Mac' }, { Cookie: cookie });
+    const created = await call('devices', { name: 'Mac' }, { Authorization: cookie });
     expect(created.status).toBe(201);
     const device = await created.json() as { id: string; token: string };
     const user = await authenticate(request('me', undefined, { Authorization: `Bearer ${device.token}` }), bindings);
     expect(user?.via).toBe('token');
     expect((await call('devices', undefined, { Authorization: `Bearer ${device.token}` })).status).toBe(401);
-    await call(`devices/${device.id}`, undefined, { Cookie: cookie }, 'DELETE');
+    await call(`devices/${device.id}`, undefined, { Authorization: cookie }, 'DELETE');
     expect(await authenticate(request('me', undefined, { Authorization: `Bearer ${device.token}` }), bindings)).toBeNull();
   });
   it('one account cannot revoke another account device', async () => {
     await seed();
     const a = await login();
-    const response = await call('devices', { name: 'Mac' }, { Cookie: a });
+    const response = await call('devices', { name: 'Mac' }, { Authorization: a });
     const device = await response.json() as { id: string; token: string };
     await seed('other@example.com');
     const b = await login('other@example.com');
-    await call(`devices/${device.id}`, undefined, { Cookie: b }, 'DELETE');
+    await call(`devices/${device.id}`, undefined, { Authorization: b }, 'DELETE');
     expect(await authenticate(request('me', undefined, { Authorization: `Bearer ${device.token}` }), bindings)).not.toBeNull();
   });
   it('concurrent device creation cannot exceed ten active tokens', async () => {
     const id = await seed();
     const cookie = await login();
     for (let i = 0; i < 9; i++) await db.prepare('INSERT INTO device_tokens(id,hash,user_id,name,created_at,expires_at,auth_version) VALUES(?,?,?,?,?,?,0)').bind(crypto.randomUUID(), randomToken(), id, 'seed', Date.now(), Date.now() + 60000).run();
-    const responses = await Promise.all([call('devices', { name: 'a' }, { Cookie: cookie }), call('devices', { name: 'b' }, { Cookie: cookie })]);
+    const responses = await Promise.all([call('devices', { name: 'a' }, { Authorization: cookie }), call('devices', { name: 'b' }, { Authorization: cookie })]);
     expect(responses.map(r => r.status).sort()).toEqual([201, 409]);
   });
   it('caps concurrent provider sign-ins atomically and releases every lease', async () => {
@@ -224,8 +233,8 @@ describe('hosted accounts with real D1', () => {
     expect(user?.recovery_hash).toBe(await tokenHash(recoveryCode));
     expect(user?.recovery_hash).not.toBe(recoveryCode);
     const cookie = await login('new@example.com');
-    expect((await authenticate(request('me', undefined, { Cookie: cookie }), bindings))?.verified).toBe(false);
-    expect((await call('devices', { name: 'Mac' }, { Cookie: cookie })).status).toBe(201);
+    expect((await authenticate(request('me', undefined, { Authorization: cookie }), bindings))?.verified).toBe(false);
+    expect((await call('devices', { name: 'Mac' }, { Authorization: cookie })).status).toBe(201);
     expect((await db.prepare('SELECT COUNT(*) n FROM account_tokens').first<{ n: number }>())!.n).toBe(0);
   });
   it('requires configured Turnstile and the correct challenge hostname', async () => {
@@ -256,7 +265,7 @@ describe('hosted accounts with real D1', () => {
     const id = await seed('person@example.com', false), recoveryCode = randomToken();
     await db.prepare('UPDATE users SET recovery_hash=? WHERE id=?').bind(await tokenHash(recoveryCode), id).run();
     const cookie = await login();
-    const deviceResponse = await call('devices', { name: 'Mac' }, { Cookie: cookie });
+    const deviceResponse = await call('devices', { name: 'Mac' }, { Authorization: cookie });
     const { token: device } = await deviceResponse.json() as { token: string };
     const reset = (code: string) => call('reset-password', { email: 'person@example.com', recoveryCode: code, password: 'new-owner-password', turnstileToken: 'captcha' });
     const responses = await Promise.all([reset(recoveryCode), reset(recoveryCode)]);
@@ -265,7 +274,7 @@ describe('hosted accounts with real D1', () => {
     const { recoveryCode: next } = await responses.find(r => r.status === 200)!.json() as { recoveryCode: string };
     expect(next).not.toBe(recoveryCode);
     expect((await reset(recoveryCode)).status).toBe(400);
-    expect(await authenticate(request('me', undefined, { Cookie: cookie }), bindings)).toBeNull();
+    expect(await authenticate(request('me', undefined, { Authorization: cookie }), bindings)).toBeNull();
     expect(await authenticate(request('me', undefined, { Authorization: `Bearer ${device}` }), bindings)).toBeNull();
     expect((await call('login', { email: 'person@example.com', password })).status).toBe(401);
     expect((await call('login', { email: 'person@example.com', password: 'new-owner-password' })).status).toBe(200);
@@ -276,7 +285,7 @@ describe('hosted accounts with real D1', () => {
     await seed('person@example.com', false);
     for (let i = 0; i < 5; i++) expect((await call('reset-password', { email: 'person@example.com', recoveryCode: randomToken(), password, turnstileToken: 'captcha' })).status).toBe(400);
     expect((await call('reset-password', { email: 'person@example.com', recoveryCode: randomToken(), password, turnstileToken: 'captcha' })).status).toBe(429);
-    expect(await login()).toContain('__Host-shotsync=');
+    expect(await login()).toContain('Bearer jwt.');
   });
   it('cleanup retains active unverified accounts and removes expired sessions', async () => {
     const id = await seed('person@example.com', false);
@@ -297,9 +306,9 @@ describe('hosted accounts with real D1', () => {
     await seed('person@example.com', false);
     const response = await call('login', { email: 'person@example.com', password });
     expect(response.headers.get('Set-Cookie')).toMatch(/HttpOnly; Secure; SameSite=Lax/);
-    const cookie = response.headers.get('Set-Cookie')!.split(';')[0];
-    expect((await call('logout', {}, { Cookie: cookie })).status).toBe(200);
-    expect(await authenticate(request('me', undefined, { Cookie: cookie }), bindings)).toBeNull();
+    const cookie = 'Bearer ' + (await response.json() as {accessToken:string}).accessToken;
+    expect((await call('logout', {}, { Authorization: cookie })).status).toBe(200);
+    expect(await authenticate(request('me', undefined, { Authorization: cookie }), bindings)).toBeNull();
   });
   it('requires a fresh captcha for recovery and rate limits password guessing', async () => {
     const id = await seed('person@example.com', false), recoveryCode = randomToken();
@@ -308,6 +317,42 @@ describe('hosted accounts with real D1', () => {
     for (let i = 0; i < 10; i++) expect((await call('login', { email: 'person@example.com', password: 'x' })).status).toBe(401);
     expect((await call('login', { email: 'person@example.com', password })).status).toBe(429);
     expect((await db.prepare('SELECT recovery_hash FROM users WHERE id=?').bind(id).first())?.recovery_hash).toBe(await tokenHash(recoveryCode));
+  });
+  it('restores a provider session using only the HttpOnly refresh cookie and never stores browser tokens in D1', async () => {
+    await seed();
+    const response = await call('login', {email:'person@example.com',password});
+    const cookie = response.headers.get('Set-Cookie')!.split(';')[0];
+    expect(cookie).toContain('__Host-shotsync-refresh=');
+    expect(await authenticate(request('me',undefined,{Cookie:cookie}),bindings)).toBeNull();
+    const refreshed = await call('refresh',{}, {Cookie:cookie});
+    expect(refreshed.status).toBe(200);
+    const body = await refreshed.json() as {accessToken:string};
+    expect(await authenticate(request('me',undefined,{Authorization:`Bearer ${body.accessToken}`}),bindings)).not.toBeNull();
+    expect(await db.prepare('SELECT hash FROM sessions').first()).toBeNull();
+    expect((await call('refresh',{}, {Cookie:cookie,Origin:'https://evil.test'})).status).toBe(403);
+    await call('logout',{}, {Authorization:`Bearer ${body.accessToken}`,Cookie:cookie});
+    expect((await call('refresh',{}, {Cookie:cookie})).status).toBe(409);
+  });
+  it('blocks all JWTs of a session and retains failed provider sign-outs indefinitely', async () => {
+    await seed();
+    const authorization=await login();
+    const session=sessions.get(authorization.slice(7))!;
+    vi.mocked(provider.revokeProviderSession).mockRejectedValue(new HttpError(503,'Provider unavailable'));
+    const logout=await call('logout',{}, {Authorization:authorization});
+    expect(logout.status).toBe(200);
+    expect(logout.headers.get('Set-Cookie')).toContain('Max-Age=0');
+    const later={...session,accessToken:'jwt.later.signature',expiresAt:Date.now()+86400000}; sessions.set(later.accessToken,later);
+    expect(await authenticate(request('me',undefined,{Authorization:`Bearer ${later.accessToken}`}),bindings)).toBeNull();
+    expect(await db.prepare('SELECT expires_at FROM revoked_auth_sessions').first()).toEqual({expires_at:Number.MAX_SAFE_INTEGER});
+    await cleanupAccounts(db);
+    expect((await call('refresh',{}, {Cookie:`__Host-shotsync-refresh=${session.refreshToken}`})).status).toBe(409);
+  });
+  it('rejects stale signed auth versions and legacy browser cookies', async () => {
+    const id=await seed();
+    const jwt=issue(id);
+    await db.prepare('UPDATE users SET auth_version=1 WHERE id=?').bind(id).run();
+    expect(await authenticate(request('me',undefined,{Authorization:`Bearer ${jwt.accessToken}`}),bindings)).toBeNull();
+    expect(await authenticate(request('me',undefined,{Cookie:`__Host-shotsync=${randomToken()}`}),bindings)).toBeNull();
   });
   it('removes email verification and emailed password reset endpoints', async () => {
     for (const route of ['verify', 'resend-verification', 'forgot-password']) expect((await call(route, {})).status).toBe(404);
