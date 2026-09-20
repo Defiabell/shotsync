@@ -155,6 +155,6 @@ npm run dev       # 本地开发 —— 建一个含 AUTH_TOKEN=<任意串> 的 
 
 ## 托管账号版（公开试用）
 
-可独立部署邮箱＋密码注册／登录、恢复码重置密码（无需发邮件）、多用户文件隔离、设备令牌和账号／全站限额。[打开托管服务](https://shotsync-hosted.defiabell.workers.dev)。当前免费版试用，限 100 个账号；登录 CPU 实测仍超过免费版标称预算，高负载下可能受限。部署与限制见 [docs/hosted.md](docs/hosted.md)。现有自部署和只读 demo 保持原有使用方式；开发工具链需要 Node.js 22+。
+可独立部署邮箱＋密码注册／登录、恢复码重置密码（无需发邮件）、多用户文件隔离、设备令牌和账号／全站限额。[打开托管服务](https://shotsync-hosted.defiabell.workers.dev)。当前使用 Supabase Auth，在免费版试用，限 100 个账号；登录 CPU 三次实测为 27、9、10 ms，首次仍超过免费版标称 10 ms，尚未验证高负载容量。部署与限制见 [docs/hosted.md](docs/hosted.md)。现有自部署和只读 demo 保持原有使用方式；开发工具链需要 Node.js 22+。
 
 托管认证由 Supabase Auth 处理密码和浏览器会话，运营者需配置独立个人项目。网站注册先由服务端检查人数上限，Supabase 公开注册保持关闭；迁移、上线状态与故障处理见部署文档。
