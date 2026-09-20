@@ -92,6 +92,7 @@ try {
  for (const migration of await readD1Migrations('migrations')) await db.batch(migration.queries.map(query => db.prepare(query)));
  await db.prepare("INSERT INTO users(id,email,password_hash,verified_at,created_at,auth_provider_id,auth_state) VALUES(?,?,'external:supabase',NULL,1,?,'active')")
   .bind(fixtureId, 'browser@example.com', fixtureId).run();
+ await db.prepare('UPDATE users SET retention_days=90 WHERE id=?').bind(fixtureId).run();
  browser=await chromium.launch({headless:true});
  const context=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:390,height:844}});
  const page=await context.newPage();
@@ -105,6 +106,7 @@ try {
  await page.goto(origin);
  await page.locator('#email').fill('browser@example.com');await page.locator('#password').fill(password);await page.locator('#auth-submit').click();
  await expect(page.locator('#app')).toBeVisible();
+ await expect(page.locator('#retention')).toContainText('内容保留 90 天');
  const firstAccessToken=lastAccessToken;expect(firstAccessToken.split('.')).toHaveLength(3);
  await page.reload();await expect(page.locator('#app')).toBeVisible();
  expect(providerCalls.filter(call=>call==='POST /auth/v1/token').length).toBeGreaterThanOrEqual(2);
@@ -117,7 +119,11 @@ try {
  await page.locator('#device-name').fill('测试设备');await page.locator('#device-form button').click();await expect(page.locator('#new-token')).toBeVisible();
  const token=await page.locator('#token-value').textContent();
  const deviceList=await context.request.get(origin+'/api/list',{headers:{Authorization:'Bearer '+token}});expect(deviceList.status()).toBe(200);
- const item=(await deviceList.json()).items[0];
+ const list=await deviceList.json();expect(list.limits.retentionDays).toBe(90);
+ const item=list.items[0];
+ expect(item.expiresAt-Date.now()).toBeGreaterThan(89*86400000);
+ await expect(page.locator('.tilebody > .muted')).toContainText(new Date(item.expiresAt).toLocaleString('zh-CN'));
+ await expect(page.locator('.tilebody > .muted')).toContainText('到期');
  const privateContext=await browser.newContext({ignoreHTTPSErrors:true});
  expect((await privateContext.request.get(origin+'/i/'+item.id)).status()).toBe(401);
  await page.getByRole('button',{name:'分享',exact:true}).click();
@@ -126,6 +132,22 @@ try {
  await page.locator('#devices button').click();await expect(page.locator('#devices .device')).toHaveCount(0);expect((await privateContext.request.get(origin+'/api/list',{headers:{Authorization:'Bearer '+token}})).status()).toBe(401);
  await page.screenshot({path:join(temp,'mobile.png'),fullPage:true});
  page.on('dialog',dialog=>dialog.accept());await page.getByRole('button',{name:'删除',exact:true}).click();await expect(page.locator('.tile')).toHaveCount(0);
+ // Account policy and object expiration must agree, including unlimited storage time.
+ await db.prepare('UPDATE users SET retention_days=0 WHERE id=?').bind(fixtureId).run();
+ await page.locator('#refresh').click();await expect(page.locator('#retention')).toContainText('内容永久保存，不自动过期');
+ await page.locator('#text').fill('永久保留测试');await page.locator('#text-form button').click();
+ await expect(page.locator('.tile')).toHaveCount(1);
+ await expect(page.locator('.tilebody > .muted')).toContainText('永久保存，不自动过期');
+ const permanentList=await page.evaluate(()=>api('/api/list'));
+ expect(permanentList.limits.retentionDays).toBe(0);expect(permanentList.items[0].expiresAt).toBeNull();
+ const shareResponse=page.waitForResponse(response=>response.request().method()==='POST'&&new URL(response.url()).pathname.startsWith('/api/share/'));
+ await page.getByRole('button',{name:'分享',exact:true}).click();
+ const permanentShare=await (await shareResponse).json();
+ expect(permanentShare.expiresAt-Date.now()).toBeGreaterThan(23*3600000);
+ expect(permanentShare.expiresAt-Date.now()).toBeLessThanOrEqual(24*3600000);
+ await expect(page.getByText('任何持有链接的人都可访问', {exact:false})).toContainText('有效期最多 24 小时');
+ await page.getByRole('button',{name:'删除',exact:true}).click();await expect(page.locator('.tile')).toHaveCount(0);
+ await db.prepare('UPDATE users SET retention_days=90 WHERE id=?').bind(fixtureId).run();
  refreshFailure=429;
  await page.evaluate(()=>{expiresAt=Date.now()-1;});
  await page.locator('#refresh').click();
@@ -153,6 +175,7 @@ try {
  expect(await page.locator('#password').inputValue()).toBe('');
  await page.locator('#recovery-saved').check();await page.locator('#finish-recovery').click();await expect(page.locator('#recovery-value')).toHaveText('');
  await page.locator('#password').fill(password);await page.locator('#auth-submit').click();await expect(page.locator('#app')).toBeVisible();
+ await expect(page.locator('#retention')).toContainText('内容保留 7 天');
  const preRecoveryJWT=lastAccessToken;
  const recoveryDeviceResponse=await context.request.post(origin+'/api/account/devices',{headers:{Authorization:'Bearer '+preRecoveryJWT,Origin:origin},data:{name:'recovery fixture'}});
  expect(recoveryDeviceResponse.status()).toBe(201);
@@ -177,7 +200,7 @@ try {
  const registered=await db.prepare('SELECT password_hash,auth_state,verified_at FROM users WHERE email=?').bind('new@example.com').first();
  expect(registered).toMatchObject({password_hash:'external:supabase',auth_state:'active',verified_at:null});
  expect(await page.evaluate(()=>localStorage.length+sessionStorage.length)).toBe(0);expect(errors).toEqual([]);
- console.log('PASS: real browser signed-JWT login, reload/rotating refresh, concurrent 401 singleflight, upload/private preview, device isolation, share/revoke, delete, logout revocation; registration/recovery rotates codes and invalidates old JWT/device, with fake provider/Turnstile only at outbound boundaries');
+ console.log('PASS: real browser signed-JWT login, reload/rotating refresh, concurrent 401 singleflight, 90-day/permanent retention with 24-hour shares, upload/private preview, device isolation, share/revoke, delete, logout revocation; registration/recovery rotates codes and invalidates old JWT/device, with fake provider/Turnstile only at outbound boundaries');
  await privateContext.close();await context.close();
 } finally {
  if(browser)await browser.close();if(server)await server.dispose();

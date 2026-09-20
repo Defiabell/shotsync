@@ -92,3 +92,69 @@ describe('hosted tenant isolation and exact quotas', () => {
   expect((await worker.fetch(new Request('https://other.test/'),hosted)).status).toBe(421);
  });
 });
+
+describe('account-specific retention with unchanged quotas', () => {
+ const DAY = 86_400_000;
+ async function configure(days: number) { await bindings.DB.prepare('UPDATE users SET retention_days=? WHERE id=?').bind(days,user.id).run(); }
+ it('defaults to seven days and validates operator configuration in D1', async () => {
+  const uploaded=await (await upload()).json<{id:string;expiresAt:number}>();
+  const row=await bindings.DB.prepare('SELECT created_at,expires_at,storage_prefix FROM files WHERE id=?').bind(uploaded.id).first<{created_at:number;expires_at:number;storage_prefix:string}>();
+  expect(row!.expires_at-row!.created_at).toBe(7*DAY);expect(uploaded.expiresAt).toBe(row!.expires_at);expect(row!.storage_prefix).toBe('users');
+  expect((await getUsage(hosted,user)).limits.retentionDays).toBe(7);
+  for(const invalid of [-1,3651,1.5]) await expect(configure(invalid)).rejects.toThrow();
+ });
+ it('retains a ninety-day upload beyond day eight and expires it at day ninety', async () => {
+  await configure(90);const id=await saved();
+  const row=await bindings.DB.prepare('SELECT created_at,expires_at,storage_prefix FROM files WHERE id=?').bind(id).first<{created_at:number;expires_at:number;storage_prefix:string}>();
+  expect(row!.expires_at-row!.created_at).toBe(90*DAY);expect(row!.storage_prefix).toBe('retained');
+  expect((await bindings.BUCKET.list()).objects.map(o=>o.key)).toEqual([`retained/u1/${id}/full`]);
+  expect((await getUsage(hosted,user)).limits.retentionDays).toBe(90);expect((await getUsage(hosted,other)).limits.retentionDays).toBe(7);
+  const clock=vi.spyOn(Date,'now').mockReturnValue(row!.created_at+9*DAY);
+  try {
+   await cleanupFiles(hosted);expect(await (await handleFiles(req(`/i/${id}`),hosted,user)).text()).toBe('hello');
+   clock.mockReturnValue(row!.expires_at);expect((await handleFiles(req(`/i/${id}`),hosted,user)).status).toBe(404);
+   await cleanupFiles(hosted);expect((await bindings.BUCKET.list()).objects).toHaveLength(0);
+  } finally { clock.mockRestore(); }
+ });
+ it('keeps permanent files readable and shareable after cleanup while links still expire', async () => {
+  await configure(0);const uploaded=await (await upload()).json<{id:string;expiresAt:null}>();expect(uploaded.expiresAt).toBeNull();
+  const clock=vi.spyOn(Date,'now').mockReturnValue(Date.now()+366*DAY);
+  try {
+   await cleanupFiles(hosted);
+   const listed=await (await handleFiles(req('/api/list'),hosted,user)).json<{items:Array<{expiresAt:null}>;limits:{retentionDays:number}}>();
+   expect(listed.items).toHaveLength(1);expect(listed.items[0].expiresAt).toBeNull();expect(listed.limits.retentionDays).toBe(0);
+   expect(await (await handleFiles(req(`/i/${uploaded.id}`),hosted,user)).text()).toBe('hello');
+   const share=await (await handleFiles(req(`/api/share/${uploaded.id}`,'POST'),hosted,user)).json<{url:string;expiresAt:number}>();
+   expect(share.expiresAt).toBe(Date.now()+DAY);expect(await (await handleShared(new Request(share.url),hosted)).text()).toBe('hello');
+   clock.mockReturnValue(share.expiresAt);expect((await handleShared(new Request(share.url),hosted)).status).toBe(410);
+   await handleFiles(req(`/api/img/${uploaded.id}`,'DELETE'),hosted,user);expect((await bindings.BUCKET.list()).objects).toHaveLength(0);
+  } finally { clock.mockRestore(); }
+ });
+ it('cleans abandoned pending uploads and explicit deletion regardless of retention', async () => {
+  await configure(0);const id=await saved();await bindings.DB.prepare("UPDATE files SET state='deleting' WHERE id=?").bind(id).run();
+  const now=Date.now();await bindings.DB.prepare("INSERT INTO files(id,user_id,size,state,created_at,expires_at,day,storage_prefix) VALUES('abandoned','u1',1,'pending',?,?,?,'retained')").bind(now-300_000,now-1,new Date(now).toISOString().slice(0,10)).run();
+  await bindings.BUCKET.put('retained/u1/abandoned/full','x');await cleanupFiles(hosted);
+  expect((await bindings.BUCKET.list()).objects).toHaveLength(0);expect((await getUsage(hosted,user)).usage.storedItems).toBe(0);
+ });
+ it('keeps old users-prefix objects accessible after an account is upgraded', async () => {
+  const id=await saved();await configure(0);await cleanupFiles(hosted);
+  expect(await (await handleFiles(req(`/i/${id}`),hosted,user)).text()).toBe('hello');
+  const row=await bindings.DB.prepare('SELECT storage_prefix,expires_at FROM files WHERE id=?').bind(id).first<{storage_prefix:string;expires_at:number}>();
+  expect(row!.storage_prefix).toBe('users');expect(row!.expires_at).toBeGreaterThan(0);
+  await handleFiles(req(`/api/img/${id}`,'DELETE'),hosted,user);expect((await bindings.BUCKET.list()).objects).toHaveLength(0);
+ });
+ it.each([0,90])('still enforces storage, upload and download quotas with retention %s', async retention => {
+  await configure(retention);const id=await saved();
+  await bindings.DB.prepare('UPDATE daily_usage SET download_bytes=? WHERE scope=?').bind(LIMITS.dailyDownloadBytes,user.id).run();
+  await expect(handleFiles(req(`/i/${id}`),hosted,user)).rejects.toMatchObject({status:429});
+  await bindings.DB.prepare('UPDATE storage_usage SET items=100 WHERE scope=?').bind(user.id).run();await expect(upload()).rejects.toMatchObject({status:429});
+  await bindings.DB.prepare('UPDATE storage_usage SET items=1,bytes=? WHERE scope=?').bind(LIMITS.storedBytes,user.id).run();await expect(upload()).rejects.toMatchObject({status:429});
+  await bindings.DB.prepare('UPDATE storage_usage SET bytes=5 WHERE scope=?').bind(user.id).run();
+  await bindings.DB.prepare('UPDATE daily_usage SET uploads=? WHERE scope=?').bind(LIMITS.dailyUploads,user.id).run();await expect(upload()).rejects.toMatchObject({status:429});
+ });
+ it('does not accept a client-supplied retention override', async () => {
+  const form=new FormData();form.set('full',new Blob(['x'],{type:'text/plain'}),'note.txt');form.set('retention_days','0');
+  await expect(handleFiles(new Request(origin+'/api/upload',{method:'POST',body:form}),hosted,user)).rejects.toMatchObject({status:400});
+  expect((await bindings.BUCKET.list()).objects).toHaveLength(0);expect((await getUsage(hosted,user)).limits.retentionDays).toBe(7);
+ });
+});
