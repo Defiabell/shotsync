@@ -102,51 +102,103 @@ try {
  await page.route('https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit', route => route.fulfill({
   contentType: 'application/javascript', body: "window.turnstile={render:(selector,options)=>{window.fixtureCaptcha=options;options.callback('fixture-challenge');return 'fixture-widget';},reset:()=>window.fixtureCaptcha.callback('fixture-challenge')};",
  }));
+ const previewRequests=[];page.on('request',request=>{if(/^\/(?:i|t)\//.test(new URL(request.url()).pathname))previewRequests.push(new URL(request.url()).pathname);});
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(origin);
  await page.locator('#email').fill('browser@example.com');await page.locator('#password').fill(password);await page.locator('#auth-submit').click();
  await expect(page.locator('#app')).toBeVisible();
+ await expect(page.locator('#settings-dialog')).not.toBeVisible();
+ await expect(page.locator('#composer-dialog')).not.toBeVisible();
+ await expect(page.locator('#device-form')).not.toBeVisible();
+ await page.locator('#open-settings').click();
  await expect(page.locator('#retention')).toContainText('内容保留 90 天');
+ await page.locator('#close-settings').click();
  const firstAccessToken=lastAccessToken;expect(firstAccessToken.split('.')).toHaveLength(3);
  await page.reload();await expect(page.locator('#app')).toBeVisible();
  expect(providerCalls.filter(call=>call==='POST /auth/v1/token').length).toBeGreaterThanOrEqual(2);
  const beforeConcurrent=providerCalls.filter(call=>call==='POST /auth/v1/token').length;
  await page.evaluate(async()=>{accessToken='invalid-fixture-access-token';await Promise.all([api('/api/list'),api('/api/account/devices')]);});
  expect(providerCalls.filter(call=>call==='POST /auth/v1/token').length).toBe(beforeConcurrent+1);
+ // Composer stays out of the gallery until explicitly opened.
+ await page.locator('#add-text').click();await expect(page.locator('#composer-dialog')).toBeVisible();
+ await page.locator('#close-composer').click();await expect(page.locator('#composer-dialog')).not.toBeVisible();
+ await page.locator('#add-text').click();
  await page.locator('#text').fill('跨设备取回测试');await page.locator('#text-form button').click();
- await expect(page.locator('.tile')).toHaveCount(1);
- await page.getByRole('button',{name:'预览',exact:true}).click();await expect(page.locator('.textpreview')).toHaveText('跨设备取回测试');
+ await expect(page.locator('#composer-dialog')).not.toBeVisible();await expect(page.locator('.tile')).toHaveCount(1);
+ await expect(page.locator('.tile')).toContainText('跨设备取回测试');
+ await page.locator('.tile-open').click();await expect(page.locator('#viewer-content')).toContainText('跨设备取回测试');
+ await context.grantPermissions(['clipboard-read','clipboard-write']);
+ await page.locator('#viewer-copy').click();expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe('跨设备取回测试');
+ const downloadEvent=page.waitForEvent('download');await page.locator('#viewer-download').click();expect((await downloadEvent).suggestedFilename()).toBe('text.txt');
+ await page.locator('#close-viewer').click();
+ await page.locator('#open-settings').click();
  await page.locator('#device-name').fill('测试设备');await page.locator('#device-form button').click();await expect(page.locator('#new-token')).toBeVisible();
  const token=await page.locator('#token-value').textContent();
  const deviceList=await context.request.get(origin+'/api/list',{headers:{Authorization:'Bearer '+token}});expect(deviceList.status()).toBe(200);
  const list=await deviceList.json();expect(list.limits.retentionDays).toBe(90);
- const item=list.items[0];
- expect(item.expiresAt-Date.now()).toBeGreaterThan(89*86400000);
- await expect(page.locator('.tilebody > .muted')).toContainText(new Date(item.expiresAt).toLocaleString('zh-CN'));
- await expect(page.locator('.tilebody > .muted')).toContainText('到期');
+ const item=list.items[0];expect(item.expiresAt-Date.now()).toBeGreaterThan(89*86400000);
+ await page.locator('#close-settings').click();await page.locator('.tile-open').click();
+ await expect(page.locator('#viewer-meta')).toContainText(new Date(item.expiresAt).toLocaleString('zh-CN'));
+ await expect(page.locator('#viewer-meta')).toContainText('到期');
  const privateContext=await browser.newContext({ignoreHTTPSErrors:true});
  expect((await privateContext.request.get(origin+'/i/'+item.id)).status()).toBe(401);
- await page.getByRole('button',{name:'分享',exact:true}).click();
- const share=await page.getByLabel('分享链接').inputValue();expect(await (await privateContext.request.get(share)).text()).toBe('跨设备取回测试');
- await page.getByRole('button',{name:'撤销分享',exact:true}).click();await expect(page.getByText('分享已撤销。')).toBeVisible();expect((await privateContext.request.get(share)).status()).toBe(410);
+ await page.locator('#viewer-share').click();
+ await expect(page.locator('#share-link')).toHaveValue(/^https:/);const share=await page.locator('#share-link').inputValue();expect(await (await privateContext.request.get(share)).text()).toBe('跨设备取回测试');
+ await page.locator('#viewer-revoke').click();await expect(page.locator('#share-result')).not.toBeVisible();expect((await privateContext.request.get(share)).status()).toBe(410);
+ await page.locator('#close-viewer').click();await page.locator('#open-settings').click();
  await page.locator('#devices button').click();await expect(page.locator('#devices .device')).toHaveCount(0);expect((await privateContext.request.get(origin+'/api/list',{headers:{Authorization:'Bearer '+token}})).status()).toBe(401);
- await page.screenshot({path:join(temp,'mobile.png'),fullPage:true});
- page.on('dialog',dialog=>dialog.accept());await page.getByRole('button',{name:'删除',exact:true}).click();await expect(page.locator('.tile')).toHaveCount(0);
+ await page.locator('#close-settings').click();
+ // A real file-input change auto-uploads and produces an automatic thumbnail.
+ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9XkAAAAASUVORK5CYII=','base64');
+ await page.locator('#file').setInputFiles({name:'同步截图.png',mimeType:'image/png',buffer:png});
+ await expect(page.locator('.tile')).toHaveCount(2);
+ await expect.poll(()=>page.locator('.tile img').evaluateAll(images=>images.length>0&&images.every(image=>image.complete&&image.naturalWidth>0))).toBe(true);
+ const imageReads=previewRequests.length;
+ await page.locator('#refresh').click();await expect(page.locator('#refresh')).toBeEnabled();expect(previewRequests.length).toBe(imageReads);
+ // Pasting into a composer edits text; it must never upload a clipboard image.
+ await page.locator('#add-text').click();
+ await page.locator('#text').evaluate((textarea,encoded)=>{const data=new DataTransfer();data.items.add(new File([Uint8Array.from(atob(encoded),c=>c.charCodeAt(0))],'should-not-upload.png',{type:'image/png'}));textarea.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));},png.toString('base64'));
+ await page.locator('#close-composer').click();await page.locator('#refresh').click();await expect(page.locator('#refresh')).toBeEnabled();await expect(page.locator('.tile')).toHaveCount(2);
+ // Browser clipboard event enters the same upload flow without clicking upload.
+ await page.evaluate(encoded=>{const data=new DataTransfer();data.items.add(new File([Uint8Array.from(atob(encoded),c=>c.charCodeAt(0))],'粘贴截图.png',{type:'image/png'}));document.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));},png.toString('base64'));
+ await expect(page.locator('.tile')).toHaveCount(3);
+ await expect.poll(()=>page.locator('.tile img').evaluateAll(images=>images.length===2&&images.every(image=>image.complete&&image.naturalWidth>0))).toBe(true);
+ // Another device uploads; refresh discovers it without downloading old previews.
+ const remoteText='另一台设备的笔记';
+ const externalUpload=await context.request.post(origin+'/api/upload',{headers:{Authorization:'Bearer '+lastAccessToken,Origin:origin},multipart:{full:{name:'remote.txt',mimeType:'text/plain',buffer:Buffer.from(remoteText)}}});expect(externalUpload.status()).toBe(200);
+ const oldReads=[...previewRequests];await page.locator('#refresh').click();await expect(page.locator('.tile')).toHaveCount(4);await expect(page.locator('#gallery')).toContainText(remoteText);
+ for(const path of new Set(oldReads))expect(previewRequests.filter(value=>value===path).length).toBe(oldReads.filter(value=>value===path).length);
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await page.screenshot({path:'/tmp/shotsync-sync-gallery-mobile.png',fullPage:true});
+ await page.setViewportSize({width:1280,height:900});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await page.screenshot({path:'/tmp/shotsync-sync-gallery-desktop.png',fullPage:true});
+ await page.setViewportSize({width:390,height:844});
+ // An earlier upload finishing must not close a newly opened composer or erase its draft.
+ let releaseComposer;const composerGate=new Promise(resolve=>{releaseComposer=resolve;});
+ let composerArrived;const composerPending=new Promise(resolve=>{composerArrived=resolve;});
+ await page.route('**/api/upload',async route=>{const response=await route.fetch();composerArrived();await composerGate;await route.fulfill({response});},{times:1});
+ await page.locator('#add-text').click();await page.locator('#text').fill('迟到的旧提交');await page.locator('#text-form button').click();await composerPending;
+ await page.locator('#close-composer').click();await page.locator('#add-text').click();await page.locator('#text').fill('不能丢失的新草稿');releaseComposer();
+ await expect(page.locator('#text-form button')).toBeEnabled();await expect(page.locator('#composer-dialog')).toBeVisible();await expect(page.locator('#text')).toHaveValue('不能丢失的新草稿');await page.locator('#close-composer').click();
+ await expect(page.locator('.tile')).toHaveCount(5);
+ page.on('dialog',dialog=>dialog.accept());
+ while(await page.locator('.tile').count()){const remaining=await page.locator('.tile').count();await page.locator('.tile-open').first().click();await page.locator('#viewer-delete').click();await expect(page.locator('#viewer-dialog')).not.toBeVisible();await expect(page.locator('.tile')).toHaveCount(remaining-1);}
  // Account policy and object expiration must agree, including unlimited storage time.
  await db.prepare('UPDATE users SET retention_days=0 WHERE id=?').bind(fixtureId).run();
- await page.locator('#refresh').click();await expect(page.locator('#retention')).toContainText('内容永久保存，不自动过期');
+ await page.locator('#refresh').click();await expect(page.locator('#refresh')).toBeEnabled();await page.locator('#open-settings').click();await expect(page.locator('#retention')).toContainText('内容永久保存，不自动过期');await page.locator('#close-settings').click();
+ await page.locator('#add-text').click();
  await page.locator('#text').fill('永久保留测试');await page.locator('#text-form button').click();
  await expect(page.locator('.tile')).toHaveCount(1);
- await expect(page.locator('.tilebody > .muted')).toContainText('永久保存，不自动过期');
+ await page.locator('.tile-open').click();await expect(page.locator('#viewer-meta')).toContainText('永久保存');
  const permanentList=await page.evaluate(()=>api('/api/list'));
  expect(permanentList.limits.retentionDays).toBe(0);expect(permanentList.items[0].expiresAt).toBeNull();
  const shareResponse=page.waitForResponse(response=>response.request().method()==='POST'&&new URL(response.url()).pathname.startsWith('/api/share/'));
- await page.getByRole('button',{name:'分享',exact:true}).click();
+ await page.locator('#viewer-share').click();
  const permanentShare=await (await shareResponse).json();
  expect(permanentShare.expiresAt-Date.now()).toBeGreaterThan(23*3600000);
  expect(permanentShare.expiresAt-Date.now()).toBeLessThanOrEqual(24*3600000);
- await expect(page.getByText('任何持有链接的人都可访问', {exact:false})).toContainText('有效期最多 24 小时');
- await page.getByRole('button',{name:'删除',exact:true}).click();await expect(page.locator('.tile')).toHaveCount(0);
+ await expect(page.getByText('任何持有链接的人都可访问', {exact:false})).toContainText('最多 24 小时');
+ await page.locator('#viewer-delete').click();await expect(page.locator('.tile')).toHaveCount(0);
  await db.prepare('UPDATE users SET retention_days=90 WHERE id=?').bind(fixtureId).run();
  refreshFailure=429;
  await page.evaluate(()=>{expiresAt=Date.now()-1;});
@@ -161,11 +213,14 @@ try {
  await expect(page.locator('#status')).toContainText('登录服务暂时不可用');
  await expect(page.locator('#app')).toBeVisible();
  expect(await page.evaluate(()=>accessToken.length>0)).toBe(true);
+ const failedSettingsRefresh=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/account/refresh'&&response.status()===503);
+ await page.locator('#open-settings').click();await failedSettingsRefresh;
  const beforeLogout=providerCalls.filter(call=>call==='POST /auth/v1/token').length;
  await page.locator('#logout').click();await expect(page.locator('#auth')).toBeVisible();
  expect(providerCalls.filter(call=>call==='POST /auth/v1/token').length).toBe(beforeLogout);
  expect((await context.cookies()).some(cookie=>cookie.name==='__Host-shotsync-refresh')).toBe(false);
  refreshFailure=0;expect(await page.locator('#token-value').textContent()).toBe('');
+ await expect(page.locator('#gallery')).toBeEmpty();await expect(page.locator('#viewer-content')).toBeEmpty();await expect(page.locator('#settings-dialog')).not.toBeVisible();
  expect((await context.request.get(origin+'/api/list',{headers:{Authorization:'Bearer '+firstAccessToken}})).status()).toBe(401);
  await page.reload();await expect(page.locator('#auth')).toBeVisible();await expect(page.locator('#app')).toBeHidden();
  await page.locator('#tab-register').click();await page.locator('#email').fill('new@example.com');await page.locator('#password').fill(password);await page.locator('#auth-submit').click();
@@ -175,7 +230,7 @@ try {
  expect(await page.locator('#password').inputValue()).toBe('');
  await page.locator('#recovery-saved').check();await page.locator('#finish-recovery').click();await expect(page.locator('#recovery-value')).toHaveText('');
  await page.locator('#password').fill(password);await page.locator('#auth-submit').click();await expect(page.locator('#app')).toBeVisible();
- await expect(page.locator('#retention')).toContainText('内容保留 7 天');
+ await page.locator('#open-settings').click();await expect(page.locator('#retention')).toContainText('内容保留 7 天');await page.locator('#close-settings').click();
  const preRecoveryJWT=lastAccessToken;
  const recoveryDeviceResponse=await context.request.post(origin+'/api/account/devices',{headers:{Authorization:'Bearer '+preRecoveryJWT,Origin:origin},data:{name:'recovery fixture'}});
  expect(recoveryDeviceResponse.status()).toBe(201);
@@ -199,8 +254,14 @@ try {
  expect(providerCalls.some(call=>call.startsWith('PUT /auth/v1/admin/users/'))).toBe(true);
  const registered=await db.prepare('SELECT password_hash,auth_state,verified_at FROM users WHERE email=?').bind('new@example.com').first();
  expect(registered).toMatchObject({password_hash:'external:supabase',auth_state:'active',verified_at:null});
+ // A stale account request cannot retry its upload body using a later session.
+ let releaseStale;const staleGate=new Promise(resolve=>{releaseStale=resolve;});let staleArrived;const stalePending=new Promise(resolve=>{staleArrived=resolve;});let staleRequests=0;
+ await page.route('**/api/upload',async route=>{staleRequests++;staleArrived();await staleGate;await route.fulfill({status:401,contentType:'application/json',body:JSON.stringify({error:'Unauthorized'})});});
+ await page.evaluate(()=>{const body=new FormData();body.append('full',new Blob(['old-account-only'],{type:'text/plain'}),'old.txt');window.staleOperation=api('/api/upload',{method:'POST',body}).catch(()=>null);});
+ await stalePending;await page.evaluate(()=>{generation++;accessToken='new-account-access-token';});releaseStale();await page.evaluate(()=>window.staleOperation);
+ expect(staleRequests).toBe(1);expect(await page.evaluate(()=>accessToken)).toBe('new-account-access-token');await expect(page.locator('#app')).toBeVisible();await page.unroute('**/api/upload');
  expect(await page.evaluate(()=>localStorage.length+sessionStorage.length)).toBe(0);expect(errors).toEqual([]);
- console.log('PASS: real browser signed-JWT login, reload/rotating refresh, concurrent 401 singleflight, 90-day/permanent retention with 24-hour shares, upload/private preview, device isolation, share/revoke, delete, logout revocation; registration/recovery rotates codes and invalidates old JWT/device, with fake provider/Turnstile only at outbound boundaries');
+ console.log('PASS: gallery composer/image/paste, cached previews and remote refresh, viewer copy/download/share/revoke/delete, desktop/mobile layouts, settings/device isolation; native JWT login/refresh/logout/recovery and retention; delayed composer and stale-session 401 regressions. Core flows use real Worker/D1/R2 with external provider/Turnstile fixtures.');
  await privateContext.close();await context.close();
 } finally {
  if(browser)await browser.close();if(server)await server.dispose();
