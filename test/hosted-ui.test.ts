@@ -31,6 +31,14 @@ describe('hosted browser UI security and protocol', () => {
     expect(html).toContain('if(stamp!==generation)return');
   });
 
+  it('keeps everyday gallery and connection controls available', () => {
+    const html = render();
+    for (const id of ['select-items', 'delete-selected', 'cancel-selection', 'gallery-url', 'copy-gallery-url', 'reveal-token', 'copy-token', 'dismiss-token']) {
+      expect(html).toContain('id="' + id + '"');
+    }
+    expect(html).not.toMatch(/localStorage|sessionStorage/);
+  });
+
   it('escapes configuration to prevent script breakout', () => {
     const html = render('</script><script>alert(1)</script>');
     expect(html).not.toContain('</script><script>alert(1)');

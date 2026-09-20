@@ -477,13 +477,20 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
 }
 
-// Read-only demo pool: no token gate, no write affordances, a link back to the repo.
+// Read-only demo pool: offer the hosted service and self-hosting without enabling writes.
 async function enterDemo() {
   showApp();
   ["#uploadBtn", "#textBtn", "#selectBtn", "#settingsBtn", "#shareBtn", "#delBtn"].forEach((s) => $(s).classList.add("hidden"));
   if (DEMO_EN) document.documentElement.lang = "en";
   $("#bar h1").textContent = DEMO_EN ? "shotsync · read-only demo" : "shotsync · 只读演示池";
   $("#closeBtn").textContent = DEMO_EN ? "Close" : "关闭";
+  $("#bar").style.flexWrap = "wrap";
+  const hosted = document.createElement("a");
+  hosted.id = "hosted-link";
+  hosted.href = "https://shotsync-hosted.defiabell.workers.dev";
+  hosted.textContent = DEMO_EN ? "Use online →" : "直接使用在线版 →";
+  hosted.style.cssText = "background:#2b6cff;color:#fff;font-size:13px;text-decoration:none;padding:8px 12px;border-radius:8px;white-space:nowrap";
+  $("#bar").appendChild(hosted);
   const link = document.createElement("a");
   link.href = "https://github.com/Defiabell/shotsync";
   link.target = "_blank";

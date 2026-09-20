@@ -104,13 +104,21 @@ try {
  }));
  const previewRequests=[];page.on('request',request=>{if(/^\/(?:i|t)\//.test(new URL(request.url()).pathname))previewRequests.push(new URL(request.url()).pathname);});
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
- await page.goto(origin);
+ await context.grantPermissions(['clipboard-read','clipboard-write']);
+ await page.goto(origin+'/mobile');
+ await expect(page.locator('#mobile-url')).toHaveValue(origin+'/');
+ await page.locator('#copy-mobile-url').click();expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe(origin+'/');
+ await expect(page.locator('#open-gallery')).toHaveAttribute('href','/');
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ expect(await page.evaluate(async()=>navigator.serviceWorker?(await navigator.serviceWorker.getRegistrations()).length:0)).toBe(0);
+ await page.locator('#open-gallery').click();
  await page.locator('#email').fill('browser@example.com');await page.locator('#password').fill(password);await page.locator('#auth-submit').click();
  await expect(page.locator('#app')).toBeVisible();
  await expect(page.locator('#settings-dialog')).not.toBeVisible();
  await expect(page.locator('#composer-dialog')).not.toBeVisible();
  await expect(page.locator('#device-form')).not.toBeVisible();
  await page.locator('#open-settings').click();
+ await expect(page.locator('#mobile-guide')).toHaveAttribute('href','/mobile');
  await expect(page.locator('#retention')).toContainText('内容保留 90 天');
  await page.locator('#close-settings').click();
  const firstAccessToken=lastAccessToken;expect(firstAccessToken.split('.')).toHaveLength(3);
@@ -132,8 +140,22 @@ try {
  const downloadEvent=page.waitForEvent('download');await page.locator('#viewer-download').click();expect((await downloadEvent).suggestedFilename()).toBe('text.txt');
  await page.locator('#close-viewer').click();
  await page.locator('#open-settings').click();
+ const createdDeviceResponse=page.waitForResponse(response=>response.request().method()==='POST'&&new URL(response.url()).pathname==='/api/account/devices');
  await page.locator('#device-name').fill('测试设备');await page.locator('#device-form button').click();await expect(page.locator('#new-token')).toBeVisible();
- const token=await page.locator('#token-value').textContent();
+ // Connection settings expose a clean gallery URL and keep new device tokens in this session only.
+ expect(new URL(await page.locator('#gallery-url').inputValue()).href).toBe(origin+'/');
+ await page.locator('#copy-gallery-url').click();expect(new URL(await page.evaluate(()=>navigator.clipboard.readText())).href).toBe(origin+'/');
+ const createdDevice=await (await createdDeviceResponse).json();
+ await expect(page.locator('#token-value')).not.toHaveText(createdDevice.token);
+ await page.locator('#reveal-token').click();
+ const token=await page.locator('#token-value').textContent();expect(token).toBe(createdDevice.token);
+ await page.locator('#copy-token').click();expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe(token);
+ await page.locator('#reveal-token').click();await expect(page.locator('#token-value')).not.toHaveText(token);
+ await page.locator('#close-settings').click();await page.locator('#open-settings').click();
+ await page.locator('#devices').getByRole('button',{name:'查看令牌',exact:true}).click();
+ await expect(page.locator('#token-value')).not.toHaveText(token);await page.locator('#reveal-token').click();await expect(page.locator('#token-value')).toHaveText(token);
+ await page.locator('#dismiss-token').click();await expect(page.locator('#new-token')).not.toBeVisible();
+ await page.locator('#devices').getByRole('button',{name:'查看令牌',exact:true}).click();await page.locator('#reveal-token').click();await expect(page.locator('#token-value')).toHaveText(token);
  const deviceList=await context.request.get(origin+'/api/list',{headers:{Authorization:'Bearer '+token}});expect(deviceList.status()).toBe(200);
  const list=await deviceList.json();expect(list.limits.retentionDays).toBe(90);
  const item=list.items[0];expect(item.expiresAt-Date.now()).toBeGreaterThan(89*86400000);
@@ -146,7 +168,7 @@ try {
  await expect(page.locator('#share-link')).toHaveValue(/^https:/);const share=await page.locator('#share-link').inputValue();expect(await (await privateContext.request.get(share)).text()).toBe('跨设备取回测试');
  await page.locator('#viewer-revoke').click();await expect(page.locator('#share-result')).not.toBeVisible();expect((await privateContext.request.get(share)).status()).toBe(410);
  await page.locator('#close-viewer').click();await page.locator('#open-settings').click();
- await page.locator('#devices button').click();await expect(page.locator('#devices .device')).toHaveCount(0);expect((await privateContext.request.get(origin+'/api/list',{headers:{Authorization:'Bearer '+token}})).status()).toBe(401);
+ await page.locator('#devices').getByRole('button',{name:'撤销',exact:true}).click();await expect(page.locator('#devices .device')).toHaveCount(0);expect((await privateContext.request.get(origin+'/api/list',{headers:{Authorization:'Bearer '+token}})).status()).toBe(401);
  await page.locator('#close-settings').click();
  // A real file-input change auto-uploads and produces an automatic thumbnail.
  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9XkAAAAASUVORK5CYII=','base64');
@@ -181,6 +203,24 @@ try {
  await page.locator('#close-composer').click();await page.locator('#add-text').click();await page.locator('#text').fill('不能丢失的新草稿');releaseComposer();
  await expect(page.locator('#text-form button')).toBeEnabled();await expect(page.locator('#composer-dialog')).toBeVisible();await expect(page.locator('#text')).toHaveValue('不能丢失的新草稿');await page.locator('#close-composer').click();
  await expect(page.locator('.tile')).toHaveCount(5);
+ // Selection opens no viewer, cancelling is non-destructive, and a rejected confirmation sends no delete.
+ await page.locator('#select-items').click();await page.locator('.tile-open').nth(0).click();await page.locator('.tile-open').nth(1).click();
+ await expect(page.locator('#viewer-dialog')).not.toBeVisible();await expect(page.locator('.tile.selected')).toHaveCount(2);
+ await expect(page.locator('.tile-open[aria-pressed="true"]')).toHaveCount(2);
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await page.locator('#cancel-selection').click();await expect(page.locator('.tile.selected')).toHaveCount(0);await expect(page.locator('.tile')).toHaveCount(5);
+ await page.locator('#select-items').click();await page.locator('.tile-open').nth(0).click();await page.locator('.tile-open').nth(1).click();
+ let deleteRequests=0;const trackDelete=request=>{if(request.method()==='DELETE'&&new URL(request.url()).pathname.startsWith('/api/img/'))deleteRequests++;};page.on('request',trackDelete);
+ page.once('dialog',dialog=>dialog.dismiss());await page.locator('#delete-selected').click();expect(deleteRequests).toBe(0);await expect(page.locator('.tile.selected')).toHaveCount(2);
+ // One failed deletion must stay selected; the successful deletion remains removed in real D1/R2.
+ let failedDelete=false;
+ await page.route('**/api/img/*',async route=>{if(route.request().method()==='DELETE'&&!failedDelete){failedDelete=true;await route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'fixture delete failure'})});}else await route.continue();});
+ page.once('dialog',dialog=>dialog.accept());await page.locator('#delete-selected').click();
+ await expect(page.locator('.tile')).toHaveCount(4);await expect(page.locator('.tile.selected')).toHaveCount(1);await expect(page.locator('#delete-selected')).toBeEnabled();
+ expect(deleteRequests).toBe(2);await page.unroute('**/api/img/*');
+ page.once('dialog',dialog=>dialog.accept());await page.locator('#delete-selected').click();await expect(page.locator('.tile')).toHaveCount(3);
+ expect(deleteRequests).toBe(3);page.off('request',trackDelete);
+ await expect(page.locator('#cancel-selection')).not.toBeVisible();await expect(page.locator('#select-items')).toBeVisible();
  page.on('dialog',dialog=>dialog.accept());
  while(await page.locator('.tile').count()){const remaining=await page.locator('.tile').count();await page.locator('.tile-open').first().click();await page.locator('#viewer-delete').click();await expect(page.locator('#viewer-dialog')).not.toBeVisible();await expect(page.locator('.tile')).toHaveCount(remaining-1);}
  // Account policy and object expiration must agree, including unlimited storage time.
@@ -200,6 +240,9 @@ try {
  await expect(page.getByText('任何持有链接的人都可访问', {exact:false})).toContainText('最多 24 小时');
  await page.locator('#viewer-delete').click();await expect(page.locator('.tile')).toHaveCount(0);
  await db.prepare('UPDATE users SET retention_days=90 WHERE id=?').bind(fixtureId).run();
+ // Leave a real device token in memory, then ensure logout clears it and a different account cannot view it.
+ await page.locator('#open-settings').click();await page.locator('#device-name').fill('退出隔离测试');await page.locator('#device-form button').click();await expect(page.locator('#new-token')).toBeVisible();await page.locator('#reveal-token').click();
+ const logoutToken=await page.locator('#token-value').textContent();expect(logoutToken.length).toBeGreaterThan(20);await page.locator('#close-settings').click();
  refreshFailure=429;
  await page.evaluate(()=>{expiresAt=Date.now()-1;});
  await page.locator('#refresh').click();
@@ -230,7 +273,7 @@ try {
  expect(await page.locator('#password').inputValue()).toBe('');
  await page.locator('#recovery-saved').check();await page.locator('#finish-recovery').click();await expect(page.locator('#recovery-value')).toHaveText('');
  await page.locator('#password').fill(password);await page.locator('#auth-submit').click();await expect(page.locator('#app')).toBeVisible();
- await page.locator('#open-settings').click();await expect(page.locator('#retention')).toContainText('内容保留 7 天');await page.locator('#close-settings').click();
+ await page.locator('#open-settings').click();await expect(page.locator('#retention')).toContainText('内容保留 7 天');await expect(page.locator('#new-token')).not.toBeVisible();await expect(page.locator('#devices')).not.toContainText('退出隔离测试');expect(await page.locator('#token-value').textContent()).not.toBe(logoutToken);await page.locator('#close-settings').click();
  const preRecoveryJWT=lastAccessToken;
  const recoveryDeviceResponse=await context.request.post(origin+'/api/account/devices',{headers:{Authorization:'Bearer '+preRecoveryJWT,Origin:origin},data:{name:'recovery fixture'}});
  expect(recoveryDeviceResponse.status()).toBe(201);
@@ -261,7 +304,7 @@ try {
  await stalePending;await page.evaluate(()=>{generation++;accessToken='new-account-access-token';});releaseStale();await page.evaluate(()=>window.staleOperation);
  expect(staleRequests).toBe(1);expect(await page.evaluate(()=>accessToken)).toBe('new-account-access-token');await expect(page.locator('#app')).toBeVisible();await page.unroute('**/api/upload');
  expect(await page.evaluate(()=>localStorage.length+sessionStorage.length)).toBe(0);expect(errors).toEqual([]);
- console.log('PASS: gallery composer/image/paste, cached previews and remote refresh, viewer copy/download/share/revoke/delete, desktop/mobile layouts, settings/device isolation; native JWT login/refresh/logout/recovery and retention; delayed composer and stale-session 401 regressions. Core flows use real Worker/D1/R2 with external provider/Turnstile fixtures.');
+ console.log('PASS: selection/cancel/confirmed batch delete/partial failure, gallery URL and masked session token copy/reopen/logout isolation; gallery composer/image/paste, cached previews and remote refresh, viewer copy/download/share/revoke/delete, desktop/mobile layouts, settings/device isolation; native JWT login/refresh/logout/recovery and retention; delayed composer and stale-session 401 regressions. Core flows use real Worker/D1/R2 with external provider/Turnstile fixtures.');
  await privateContext.close();await context.close();
 } finally {
  if(browser)await browser.close();if(server)await server.dispose();
