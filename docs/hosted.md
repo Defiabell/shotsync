@@ -31,7 +31,7 @@ File access, deletion and sharing resolve ownership from authenticated account I
 | API/share ingress | 120/min/IP, 600/min globally; D1-backed fixed windows |
 | Provider login/refresh requests | 120/min globally; concurrent sign-in 1 with expiring D1 lease; mutations use persistent state |
 | Registration/recovery | Turnstile and per-address/IP/global request limits; no outbound mail |
-| Retention | 7 days; access denied immediately at expiry, cron deletes objects subsequently |
+| Retention | 7 days by default; operators may set an individual account to 1–3,650 days or 0 (no automatic expiry); other quotas remain unchanged |
 | Share links | One active link/file, up to 24 hours or file expiry, 50 accesses; owner can revoke |
 
 Limits are launch defaults, not a capacity benchmark. Fixed windows may permit boundary bursts. Application limits do not cap the cost of requests reaching Cloudflare: rejected traffic still executes a Worker and some D1 queries. Billing notifications are not a hard spending cap. Configure edge protections and inspect account-level usage before raising limits or registration capacity. Resources within the same Cloudflare account may still share platform quotas.
@@ -44,7 +44,7 @@ Before reading a body, reserve the entire declared multipart Content-Length, or 
 
 On successful R2 writes, shrink the reservation to actual full+thumbnail bytes. Deleting successful files releases storage but **does not refund today's upload allowance**. Failed uploads consume an attempt but release reserved bytes after object deletion succeeds. This prevents endless upload/delete cycles from bypassing daily limits.
 
-Pending uploads expire after five minutes; the one-minute cron reclaims them, expired files and failed deletions in batches of 100. A failed R2 delete retains the quota reservation for retry. A late writer whose lease was reclaimed cannot commit and attempts to remove its objects. Configure an eight-day R2 lifecycle as a backstop for physical orphans; app expiry remains seven days. Cleanup batches can take multiple ticks, so no exact physical deletion time is promised. Lifecycle deletion alone must not be used as the quota ledger.
+Pending uploads expire after five minutes; the one-minute cron reclaims them, expired files and failed deletions in batches of 100. A failed R2 delete retains the quota reservation for retry. A late writer whose lease was reclaimed cannot commit and attempts to remove its objects. Configure an eight-day R2 lifecycle on `users/` as a backstop for ordinary uploads. Extended-retention uploads use `retained/` and must not match that rule or any broader object-deletion rule; their D1 expiry is enforced by the cleanup cron. Files without automatic expiry stay until the owner deletes them. Pending/deleting uploads still get cleaned up. App expiry remains seven days for accounts without an override. Cleanup batches can take multiple ticks, so no exact physical deletion time is promised. Lifecycle deletion alone must not be used as the quota ledger.
 
 ## Deploy prerequisites
 
@@ -87,3 +87,23 @@ Launch verification (2026-09-20): PR #4 deployed as `b20bde51-2865-4464-a784-1a7
 Native-auth rollout (2026-09-20): PR #6 merged as `549d334`; migration 0004 applied and Worker `b1507860-be09-414c-805a-2b98216b2370` deployed. Supabase settings and both keys are verified; public signup and email confirmation remain disabled, with website registration handled by ShotSync. Production had zero accounts before migration. Three real production login/refresh/logout rounds passed, including immediate denial of old JWTs and refresh tokens. Exact disposable D1/provider fixtures were removed. Real provider same-password recovery invalidated the prior refresh token in an isolated Worker. Browser tests cover registration, recovery, files, devices and refresh failures; production registration with a human Turnstile challenge has not been completed by automation.
 
 Measured production CPU for this version: login **27, 9, 10 ms**, successful refresh **8, 8, 6 ms**, successful list requests **5–9 ms**, and logout **4–5 ms**. All probes completed normally. The first observed login still exceeded the documented 10 ms Free budget, so these small samples do **not** establish reliable capacity or guarantee every request fits. No paid upgrade was made. The one-minute cleanup schedule remains installed. Store operator credentials in a mode-0600 local env file outside the repo and back it up encrypted in a private vault.
+
+## Per-account file retention
+
+Accounts themselves do not expire after seven days; the default applies to uploaded files. Migration `0005_account_retention.sql` adds `users.retention_days` (default 7, 0 for no automatic expiry, otherwise 1–3,650 days) and a persisted storage prefix on files. Configure the immutable D1 user UUID, not an email supplied by a browser. There is no public API for changing the limit. Browser and device uploads use the same server-side setting.
+
+Inspect the account and bucket lifecycle first, then update only the intended account:
+
+```sh
+npx wrangler d1 execute shotsync-hosted --remote --config wrangler.hosted.jsonc --command "SELECT id,retention_days FROM users WHERE id='USER_UUID';"
+npx wrangler r2 bucket lifecycle list shotsync-hosted
+npx wrangler d1 execute shotsync-hosted --remote --config wrangler.hosted.jsonc --command "UPDATE users SET retention_days=90 WHERE id='USER_UUID';"
+```
+
+Use `0` instead of `90` to disable automatic expiry for new uploads. This does not disable the 100-file/200-MiB storage cap, upload/download quotas, or 24-hour/50-access share-link limit. “No automatic expiry” is not a backup or service-availability guarantee.
+
+The setting applies to **new uploads**. Existing files keep their stored expiry and R2 location. Do not simply extend existing D1 timestamps while leaving objects under `users/`: the eight-day R2 lifecycle would still delete them. Existing-file migration needs a verified copy into `retained/` before changing its D1 location/expiry; never delete the source before verifying the copy. This change does not move or delete existing objects.
+
+In `/api/list` and upload responses, `expiresAt: null` means no automatic expiry; `limits.retentionDays: 0` has the same meaning. Internally, only a ready file with `expires_at=0` is permanent; pending reservations always have a short timeout. Cleanup still removes pending/deleting records and expiring share links.
+
+Rollback constraint: after migration 0005, keep code that understands `storage_prefix` and permanent `expires_at=0`. Older Workers assume every object is under `users/`, and their cleanup treats zero as expired; rolling back to them can delete permanent files. Suspend uploads and repair forward instead of deploying an old cleanup implementation.

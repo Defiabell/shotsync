@@ -2,11 +2,11 @@ import type { HostedEnv, Account } from './types';
 import { LIMITS, consumeRate } from './limits';
 import { HttpError, json, error, readBody } from './http';
 
-type FileRow = { id: string; user_id: string; name: string; mime: string; size: number; full_size: number; thumb_size: number; state: string; created_at: number; expires_at: number; day: string };
+type FileRow = { id: string; user_id: string; name: string; mime: string; size: number; full_size: number; thumb_size: number; state: string; created_at: number; expires_at: number; storage_prefix: 'users' | 'retained'; day: string };
 const MAX_BODY = LIMITS.maxImageBytes + LIMITS.maxThumbBytes + 64 * 1024;
 const DAY = 86400000;
 const day = (now = Date.now()) => new Date(now).toISOString().slice(0, 10);
-const key = (f: Pick<FileRow, 'user_id' | 'id'>, thumb = false) => `users/${f.user_id}/${f.id}/${thumb ? 'thumb' : 'full'}`;
+const key = (f: Pick<FileRow, 'user_id' | 'id' | 'storage_prefix'>, thumb = false) => `${f.storage_prefix}/${f.user_id}/${f.id}/${thumb ? 'thumb' : 'full'}`;
 export async function hashToken(token: string): Promise<string> {
   const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
   return Array.from(new Uint8Array(hash), n => n.toString(16).padStart(2, '0')).join('');
@@ -16,10 +16,15 @@ function quotaError(e: unknown): never {
   if (String(e).includes('quota:')) throw new HttpError(429, '已达到账号或服务额度，请稍后重试；可删除旧文件释放存储空间');
   throw e;
 }
+async function retentionDays(env: HostedEnv, user: Account): Promise<number> {
+  const row = await env.DB.prepare('SELECT retention_days FROM users WHERE id=?').bind(user.id).first<{ retention_days: number }>();
+  if (!row) throw new HttpError(401, '账号不存在');
+  return row.retention_days;
+}
 export async function getUsage(env: HostedEnv, user: Account) {
   const store = await env.DB.prepare('SELECT bytes,items FROM storage_usage WHERE scope=?').bind(user.id).first<{ bytes: number; items: number }>();
   const daily = await env.DB.prepare('SELECT uploads,bytes,downloads,download_bytes FROM daily_usage WHERE scope=? AND day=?').bind(user.id, day()).first<{ uploads: number; bytes: number; downloads: number; download_bytes: number }>();
-  return { usage: { storedBytes: store?.bytes ?? 0, storedItems: store?.items ?? 0, dailyUploads: daily?.uploads ?? 0, dailyBytes: daily?.bytes ?? 0, dailyDownloads: daily?.downloads ?? 0, dailyDownloadBytes: daily?.download_bytes ?? 0 }, limits: LIMITS };
+  return { usage: { storedBytes: store?.bytes ?? 0, storedItems: store?.items ?? 0, dailyUploads: daily?.uploads ?? 0, dailyBytes: daily?.bytes ?? 0, dailyDownloads: daily?.downloads ?? 0, dailyDownloadBytes: daily?.download_bytes ?? 0 }, limits: { ...LIMITS, retentionDays: await retentionDays(env, user) } };
 }
 export async function removeFile(env: HostedEnv, file: FileRow): Promise<void> {
   // Keep the reservation until both deletes succeed. A retry is idempotent.
@@ -37,10 +42,13 @@ async function upload(request: Request, env: HostedEnv, user: Account): Promise<
   const reserved = declared === null ? MAX_BODY : Number(declared);
   const id = crypto.randomUUID();
   const now = Date.now();
-  const pending: FileRow = { id, user_id: user.id, name: '', mime: '', size: reserved, full_size: 0, thumb_size: 0, state: 'pending', created_at: now, expires_at: now + 5 * 60_000, day: day(now) };
+  const retention = await retentionDays(env, user);
+  const expiresAt = retention === 0 ? 0 : now + retention * DAY;
+  const storagePrefix = retention === 0 || retention > 7 ? 'retained' : 'users';
+  const pending: FileRow = { id, user_id: user.id, name: '', mime: '', size: reserved, full_size: 0, thumb_size: 0, state: 'pending', storage_prefix: storagePrefix, created_at: now, expires_at: now + 5 * 60_000, day: day(now) };
   try {
-    await env.DB.prepare("INSERT INTO files(id,user_id,size,state,created_at,expires_at,day) VALUES(?,?,?,'pending',?,?,?)")
-      .bind(id, user.id, reserved, now, pending.expires_at, pending.day).run();
+    await env.DB.prepare("INSERT INTO files(id,user_id,size,state,created_at,expires_at,day,storage_prefix) VALUES(?,?,?,'pending',?,?,?,?)")
+      .bind(id, user.id, reserved, now, pending.expires_at, pending.day, storagePrefix).run();
   } catch (e) { quotaError(e); }
   try {
     const bytes = await readBody(request, reserved);
@@ -61,9 +69,9 @@ async function upload(request: Request, env: HostedEnv, user: Account): Promise<
     await env.BUCKET.put(key(pending), full.stream(), { httpMetadata: { contentType: mime } });
     if (thumb) await env.BUCKET.put(key(pending, true), thumb.stream(), { httpMetadata: { contentType: 'image/jpeg' } });
     const committed = await env.DB.prepare(`UPDATE files SET state='ready',size=?,full_size=?,thumb_size=?,mime=?,name=?,expires_at=? WHERE id=? AND state='pending' AND expires_at>? RETURNING id`)
-      .bind(size, full.size, thumb?.size ?? 0, mime, full.name.slice(0, 200), now + LIMITS.retentionDays * DAY, id, Date.now()).first();
+      .bind(size, full.size, thumb?.size ?? 0, mime, full.name.slice(0, 200), expiresAt, id, Date.now()).first();
     if (!committed) throw new HttpError(409, '上传已过期，请重试');
-    return json({ id, expiresAt: now + LIMITS.retentionDays * DAY });
+    return json({ id, expiresAt: expiresAt || null });
   } catch (e) {
     await removeFile(env, pending);
     if (e instanceof HttpError) throw e;
@@ -95,7 +103,7 @@ export async function handleShared(request: Request, env: HostedEnv): Promise<Re
   const hash = await hashToken(token);
   const share = await env.DB.prepare('UPDATE shares SET hits=hits+1 WHERE hash=? AND expires_at>? AND hits<50 RETURNING file_id,user_id').bind(hash, Date.now()).first<{ file_id: string; user_id: string }>();
   if (!share) return error(410, '分享已过期、撤销或达到访问上限');
-  const file = await env.DB.prepare("SELECT * FROM files WHERE id=? AND user_id=? AND state='ready' AND expires_at>?").bind(share.file_id, share.user_id, Date.now()).first<FileRow>();
+  const file = await env.DB.prepare("SELECT * FROM files WHERE id=? AND user_id=? AND state='ready' AND (expires_at=0 OR expires_at>?)").bind(share.file_id, share.user_id, Date.now()).first<FileRow>();
   if (!file) return error(410, '文件已过期');
   if (!(await consumeRate(env.DB, 'read:' + file.user_id, 120, 60))) return error(429, '访问过于频繁');
   return download(request, env, file);
@@ -105,19 +113,19 @@ export async function handleFiles(request: Request, env: HostedEnv, user: Accoun
   if (path === '/api/upload' && method === 'POST') return upload(request, env, user);
   if (path === '/api/usage' && method === 'GET') return json(await getUsage(env, user));
   if (path === '/api/list' && method === 'GET') {
-    const rows = await env.DB.prepare("SELECT * FROM files WHERE user_id=? AND state='ready' AND expires_at>? ORDER BY created_at DESC LIMIT 100").bind(user.id, Date.now()).all<FileRow>();
-    return json({ items: rows.results.map(f => ({ id: f.id, type: f.mime === 'text/plain' ? 'text' : 'image', size: f.size, createdAt: f.created_at, expiresAt: f.expires_at, name: f.name })), ...await getUsage(env, user) });
+    const rows = await env.DB.prepare("SELECT * FROM files WHERE user_id=? AND state='ready' AND (expires_at=0 OR expires_at>?) ORDER BY created_at DESC LIMIT 100").bind(user.id, Date.now()).all<FileRow>();
+    return json({ items: rows.results.map(f => ({ id: f.id, type: f.mime === 'text/plain' ? 'text' : 'image', size: f.size, createdAt: f.created_at, expiresAt: f.expires_at || null, name: f.name })), ...await getUsage(env, user) });
   }
   const match = path.match(/^\/(i|api\/img|api\/share)\/([a-f0-9-]{36})$/);
   if (!match) return error(404, '不存在');
-  const file = await env.DB.prepare("SELECT * FROM files WHERE id=? AND user_id=? AND state='ready' AND expires_at>?").bind(match[2], user.id, Date.now()).first<FileRow>();
+  const file = await env.DB.prepare("SELECT * FROM files WHERE id=? AND user_id=? AND state='ready' AND (expires_at=0 OR expires_at>?)").bind(match[2], user.id, Date.now()).first<FileRow>();
   if (!file) return error(404, '文件不存在或已过期');
   if (match[1] === 'i' && method === 'GET') return download(request, env, file);
   if (match[1] === 'api/img' && method === 'DELETE') { await removeFile(env, file); return json({ deleted: true }); }
   if (match[1] === 'api/share') {
     if (method === 'DELETE') { await env.DB.prepare('DELETE FROM shares WHERE file_id=? AND user_id=?').bind(file.id, user.id).run(); return json({ revoked: true }); }
     if (method === 'POST') {
-      const token = randomToken(), hash = await hashToken(token), expiresAt = Math.min(Date.now() + DAY, file.expires_at);
+      const token = randomToken(), hash = await hashToken(token), expiresAt = Math.min(Date.now() + DAY, file.expires_at || Infinity);
       // One active link per file: replacing it revokes its predecessor.
       await env.DB.batch([env.DB.prepare('DELETE FROM shares WHERE file_id=?').bind(file.id), env.DB.prepare('INSERT INTO shares(hash,file_id,user_id,expires_at) VALUES(?,?,?,?)').bind(hash, file.id, user.id, expiresAt)]);
       return json({ url: env.PUBLIC_ORIGIN + '/s/' + token, expiresAt });
@@ -126,7 +134,7 @@ export async function handleFiles(request: Request, env: HostedEnv, user: Accoun
   return error(405, '不支持此方法');
 }
 export async function cleanupFiles(env: HostedEnv): Promise<void> {
-  const rows = await env.DB.prepare("SELECT * FROM files WHERE expires_at<? OR state='deleting' ORDER BY expires_at LIMIT 100").bind(Date.now()).all<FileRow>();
+  const rows = await env.DB.prepare("SELECT * FROM files WHERE (state='ready' AND expires_at>0 AND expires_at<=?) OR (state='pending' AND expires_at<=?) OR state='deleting' ORDER BY expires_at LIMIT 100").bind(Date.now(), Date.now()).all<FileRow>();
   for (const file of rows.results) await removeFile(env, file);
   await env.DB.batch([
     env.DB.prepare('DELETE FROM shares WHERE expires_at<?').bind(Date.now()),
