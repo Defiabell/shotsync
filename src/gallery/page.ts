@@ -1,4 +1,5 @@
 import { maskToken } from "./settings";
+import { DEMO_ORIGIN } from "../about";
 
 // The demo variant is derived once at module load (see the bottom of this file)
 // by flipping the DEMO const the inline script declares.
@@ -510,4 +511,16 @@ async function enterDemo() {
 </body>
 </html>`;
 
-export const galleryDemoHTML = galleryHTML.replace("const DEMO = false", "const DEMO = true");
+const demoHead = [
+  `<link rel="canonical" href="${DEMO_ORIGIN}/">`,
+  `<meta property="og:type" content="website">`,
+  `<meta property="og:site_name" content="shotsync">`,
+  `<meta property="og:title" content="shotsync 只读演示">`,
+  `<meta property="og:description" content="shotsync 跨设备图片与文字池的公开样例。在自己的 Cloudflare 实例中上传截图、照片和文字，从另一台设备取回。">`,
+  `<meta property="og:url" content="${DEMO_ORIGIN}/">`,
+  `<meta name="twitter:card" content="summary">`,
+].join("\n");
+// Only the public demo knows its own origin, so canonical/og live here rather than in the shared template.
+export const galleryDemoHTML = galleryHTML
+  .replace("const DEMO = false", "const DEMO = true")
+  .replace('<link rel="manifest" href="/manifest.webmanifest">', `${demoHead}\n<link rel="manifest" href="/manifest.webmanifest">`);

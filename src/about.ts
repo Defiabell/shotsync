@@ -1,5 +1,24 @@
-export const PRODUCT_URL = "https://shotsync-demo.defiabell.workers.dev/about";
+export const DEMO_ORIGIN = "https://shotsync-demo.defiabell.workers.dev";
+export const PRODUCT_URL = `${DEMO_ORIGIN}/about`;
 const REPO = "https://github.com/Defiabell/shotsync";
+/**
+ * Sitemap <lastmod> for the product page. Bump it whenever this file's page content changes;
+ * it must equal `git log -1 --format=%cs -- src/about.ts`. (The Worker has no build step that
+ * could read git, and a deploy-time clock would be a fake date.)
+ */
+export const ABOUT_LASTMOD = "2026-11-01";
+const AUTHOR = {
+  "@type": "Person",
+  "@id": "https://defiabell.com/#person",
+  name: "Jinkun Sun",
+  alternateName: "Defiabell",
+  url: "https://defiabell.com/",
+  sameAs: ["https://github.com/Defiabell", "https://defiabell.github.io/", "https://defiabell.pages.dev/"],
+};
+const englishSummary =
+  "shotsync is an open-source, self-hosted image and text pool built with Cloudflare Workers and R2. " +
+  "Upload a screenshot or text snippet on one device and retrieve it later on another; " +
+  "a browser/PWA client with one shared access token, optional macOS and iOS Shortcut integrations.";
 const title = "shotsync — 自部署的跨设备图片与文字暂存工具";
 const description = "把截图、照片和文字放进自己的 Cloudflare 图片池，再从手机或电脑取走。了解 shotsync 的浏览器/PWA 用法、自部署步骤、共享 token、分享链接与数据保留限制。";
 
@@ -20,16 +39,37 @@ export const aboutHTML = /* html */ `<!doctype html>
 <meta name="twitter:card" content="summary">
 <script type="application/ld+json">${JSON.stringify({
   "@context": "https://schema.org",
-  "@type": "SoftwareApplication",
-  name: "shotsync",
-  url: PRODUCT_URL,
-  description,
-  applicationCategory: "UtilitiesApplication",
-  operatingSystem: "Web",
-  license: `${REPO}/blob/main/LICENSE`,
-  sameAs: REPO,
-  author: { "@type": "Person", name: "Jinkun Sun", url: "https://github.com/Defiabell" },
-})}</script>
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": `${DEMO_ORIGIN}/#website`,
+      name: "shotsync",
+      url: `${DEMO_ORIGIN}/`,
+      description,
+      inLanguage: ["zh-CN", "en"],
+      author: { "@id": AUTHOR["@id"] },
+      publisher: { "@id": AUTHOR["@id"] },
+    },
+    AUTHOR,
+    {
+      "@type": "WebApplication",
+      "@id": `${PRODUCT_URL}#app`,
+      name: "shotsync",
+      url: PRODUCT_URL,
+      description: englishSummary,
+      applicationCategory: "UtilitiesApplication",
+      operatingSystem: "Any",
+      browserRequirements: "Requires JavaScript",
+      isAccessibleForFree: true,
+      offers: { "@type": "Offer", price: 0, priceCurrency: "USD" },
+      license: `${REPO}/blob/main/LICENSE`,
+      sameAs: REPO,
+      installUrl: `${REPO}#deploy-your-own-5-min`,
+      author: { "@id": AUTHOR["@id"] },
+      isPartOf: { "@id": `${DEMO_ORIGIN}/#website` },
+    },
+  ],
+}).replace(/</g, "\\u003c")}</script>
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
@@ -102,5 +142,31 @@ export function robotsTXT(isDemo: boolean): string {
 }
 
 export function sitemapXML(isDemo: boolean): string {
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${isDemo ? `<url><loc>${PRODUCT_URL}</loc></url>` : ""}</urlset>`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${isDemo ? `<url><loc>${PRODUCT_URL}</loc><lastmod>${ABOUT_LASTMOD}</lastmod></url>` : ""}</urlset>`;
 }
+
+/** llms.txt (https://llmstxt.org): plain-text entry point for AI crawlers that do not run JavaScript. */
+export const llmsTXT = `# shotsync
+
+> ${englishSummary} Use the hosted beta without deploying, or self-host on Cloudflare's free tier in about five minutes. The read-only demo shows public samples only.
+
+Author: Jinkun Sun (Defiabell) · https://defiabell.com/ · https://github.com/Defiabell
+Site: ${DEMO_ORIGIN}/
+Language: Chinese UI; English product summary on the /about page
+
+## How it works
+
+- Open the same deployment URL on two devices and enter the same access token; both see one pool of images and text.
+- Upload a screenshot or a text snippet on one device, then save or copy it on the other. Devices do not need to be online at the same time or on the same network.
+- Single-item share links expire after 7 days. Each item's main file is limited to 25 MiB; images are re-encoded to JPEG with thumbnails.
+- Self-hosted mode stores data in your own Cloudflare R2; configure a 30-day lifecycle rule yourself. No account database, Supabase or email service is needed.
+- The hosted beta (${"https://shotsync-hosted.defiabell.workers.dev"}) adds email/password accounts, private pools and quotas; it is a separate deployment with its own retention.
+
+## Links
+
+- [Product overview and setup guide](${PRODUCT_URL}): what shotsync is, how to use it on phone and desktop, self-hosting steps, data and access limits, FAQ
+- [Read-only demo gallery](${DEMO_ORIGIN}/): public sample pool, uploads disabled
+- [Hosted beta](https://shotsync-hosted.defiabell.workers.dev): sign up with email and password, 100-account limit
+- [Source code (GitHub, MIT)](${REPO}): Cloudflare Worker + R2, deployment instructions in the README
+- [Author](https://defiabell.com/): Jinkun Sun (Defiabell), all personal projects
+`;

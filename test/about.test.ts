@@ -20,7 +20,31 @@ describe("public product page", () => {
     const scripts = [...html.matchAll(/<script([^>]*)>([\s\S]*?)<\/script>/g)];
     expect(scripts).toHaveLength(1);
     expect(scripts[0][1]).toContain('type="application/ld+json"');
-    expect(JSON.parse(scripts[0][2]).url).toBe(`${origin}/about`);
+    const graph = JSON.parse(scripts[0][2])["@graph"] as Array<Record<string, unknown>>;
+    expect(graph.map((n) => n["@type"])).toEqual(["WebSite", "Person", "WebApplication"]);
+    expect(graph[0].url).toBe(`${origin}/`);
+    expect(graph[1].sameAs).toContain("https://github.com/Defiabell");
+    expect(graph[2].url).toBe(`${origin}/about`);
+  });
+
+  it("serves llms.txt as plain text with the product links", async () => {
+    const res = await worker.fetch(new Request(`${origin}/llms.txt`), demoEnv);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/plain");
+    const text = await res.text();
+    expect(text.startsWith("# shotsync\n")).toBe(true);
+    expect(text).toContain(`](${origin}/about)`);
+    expect(text).toContain("https://github.com/Defiabell/shotsync");
+  });
+
+  it("adds canonical and Open Graph tags to the demo gallery only", async () => {
+    const demo = await (await worker.fetch(new Request(`${origin}/`), demoEnv)).text();
+    expect(demo).toContain(`<link rel="canonical" href="${origin}/">`);
+    expect(demo).toContain(`<meta property="og:url" content="${origin}/">`);
+    expect(demo).not.toContain("og:image");
+    const priv = await (await worker.fetch(new Request("https://private.example/"), env as Env)).text();
+    expect(priv).not.toContain('rel="canonical"');
+    expect(priv).not.toContain("og:url");
   });
 
   it("only lists the public product page in the demo sitemap", async () => {
@@ -28,6 +52,7 @@ describe("public product page", () => {
     expect(res.headers.get("content-type")).toContain("application/xml");
     const xml = await res.text();
     expect([...xml.matchAll(/<loc>(.*?)<\/loc>/g)].map((match) => match[1])).toEqual([`${origin}/about`]);
+    expect(xml).toMatch(/<lastmod>\d{4}-\d{2}-\d{2}<\/lastmod>/);
     const robots = await worker.fetch(new Request(`${origin}/robots.txt`), demoEnv);
     expect(robots.headers.get("content-type")).toContain("text/plain");
     const text = await robots.text();
@@ -61,7 +86,7 @@ describe("public product page", () => {
     const redirect = await worker.fetch(new Request(`${origin}/about/`), demoEnv);
     expect(redirect.status).toBe(308);
     expect(redirect.headers.get("location")).toBe("/about");
-    for (const path of ["/about", "/robots.txt", "/sitemap.xml"]) {
+    for (const path of ["/about", "/robots.txt", "/sitemap.xml", "/llms.txt"]) {
       const head = await worker.fetch(new Request(`${origin}${path}`, { method: "HEAD" }), demoEnv);
       expect(head.status).toBe(200);
       expect(await head.text()).toBe("");

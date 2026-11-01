@@ -7,7 +7,7 @@ import { handleShareCreate, handleSharedItem } from "./handlers/share";
 import { galleryDemoHTML, galleryHTML } from "./gallery/page";
 import { manifestJSON } from "./gallery/manifest";
 import { swJS } from "./gallery/sw";
-import { aboutHTML, robotsTXT, sitemapXML } from "./about";
+import { aboutHTML, llmsTXT, robotsTXT, sitemapXML } from "./about";
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -19,12 +19,13 @@ export default {
     if (pathname === "/about/" && (m === "GET" || m === "HEAD")) {
       return new Response(null, { status: 308, headers: { location: "/about" } });
     }
-    if (["/about", "/robots.txt", "/sitemap.xml"].includes(pathname)) {
+    if (["/about", "/robots.txt", "/sitemap.xml", "/llms.txt"].includes(pathname)) {
       if (m !== "GET" && m !== "HEAD") return err(405, "method not allowed");
       const body = pathname === "/about" ? aboutHTML
-        : pathname === "/robots.txt" ? robotsTXT(isDemo) : sitemapXML(isDemo);
+        : pathname === "/robots.txt" ? robotsTXT(isDemo)
+        : pathname === "/llms.txt" ? llmsTXT : sitemapXML(isDemo);
       const contentType = pathname === "/about" ? "text/html"
-        : pathname === "/robots.txt" ? "text/plain" : "application/xml";
+        : pathname === "/sitemap.xml" ? "application/xml" : "text/plain";
       return new Response(m === "HEAD" ? null : body, {
         headers: {
           "content-type": `${contentType}; charset=utf-8`,
